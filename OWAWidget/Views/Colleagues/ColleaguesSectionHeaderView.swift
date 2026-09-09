@@ -10,13 +10,10 @@ struct ColleaguesSectionHeaderView: View {
     let onJoin: (URL) -> Void
 
     @EnvironmentObject private var presence: ColleaguePresenceService
+    @EnvironmentObject private var service: CalendarService
     @EnvironmentObject private var localization: LocalizationService
 
     @State private var isHovered = false
-
-    /// Avatars shown before the row starts collapsing into "+N". Six fit beside the title in the
-    /// narrowest popover preset.
-    private let maxAvatars = 6
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
@@ -106,8 +103,12 @@ struct ColleaguesSectionHeaderView: View {
         if all.isEmpty {
             EmptyView()
         } else {
-            HStack(spacing: 4) {
-                ForEach(all.prefix(maxAvatars)) { colleague in
+            let visible = ColleagueAvatarStripLayout.visibleCount(
+                totalCount: all.count,
+                popoverWidth: service.popoverSize.width
+            )
+            HStack(spacing: ColleagueAvatarStripLayout.spacing) {
+                ForEach(all.prefix(visible)) { colleague in
                     let status = presence.status(for: colleague, now: now)
                     Button {
                         // Joining is offered from here only when the person is actually
@@ -119,7 +120,7 @@ struct ColleaguesSectionHeaderView: View {
                             model.isExpanded = true
                         }
                     } label: {
-                        InitialsAvatar(name: colleague.displayName, size: 18)
+                        InitialsAvatar(name: colleague.displayName, size: ColleagueAvatarStripLayout.avatarSize)
                             .overlay(
                                 Circle().strokeBorder(
                                     ColleaguePresenceStyle.color(for: status.presence),
@@ -133,8 +134,8 @@ struct ColleaguesSectionHeaderView: View {
                     .accessibilityLabel(help(for: colleague, now: now))
                 }
 
-                if all.count > maxAvatars {
-                    Text("+\(all.count - maxAvatars)")
+                if all.count > visible {
+                    Text("+\(all.count - visible)")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.secondary)
                 }
