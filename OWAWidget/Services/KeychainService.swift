@@ -41,7 +41,9 @@ struct KeychainService {
     }
 
     static func load(accountID: UUID) throws -> String {
-        DiagnosticLog.event("Keychain access item=accountPassword")
+        // The id prefix tells a live item apart from one left behind by a deleted account, which
+        // is the only way to spot orphans without decrypting the account store.
+        DiagnosticLog.event("Keychain access item=accountPassword id=\(accountID.uuidString.prefix(8))")
         let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
