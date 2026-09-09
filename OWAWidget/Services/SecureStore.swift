@@ -303,6 +303,9 @@ final class SecureStore: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         if let cachedKey { return cachedKey }
+        // One line per real Keychain hit — the cache makes every later store share this one, and
+        // the count is what the authorization dialogs at launch are counting too.
+        DiagnosticLog.event("Keychain access item=masterKey")
         let key = try keyProvider.key()
         cachedKey = key
         return key

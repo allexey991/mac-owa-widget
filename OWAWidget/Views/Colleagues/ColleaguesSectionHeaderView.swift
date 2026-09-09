@@ -14,8 +14,9 @@ struct ColleaguesSectionHeaderView: View {
 
     @State private var isHovered = false
 
-    /// Avatars shown before the row starts collapsing into "+N".
-    private let maxAvatars = 4
+    /// Avatars shown before the row starts collapsing into "+N". Six fit beside the title in the
+    /// narrowest popover preset.
+    private let maxAvatars = 6
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
@@ -80,7 +81,7 @@ struct ColleaguesSectionHeaderView: View {
             if model.isExpanded {
                 counterBadge(now: now)
             } else {
-                freeAvatars(now: now)
+                avatarStrip(now: now)
             }
         default:
             EmptyView()
@@ -95,17 +96,24 @@ struct ColleaguesSectionHeaderView: View {
         )
     }
 
+    /// Everyone, in the user's own order, each ringed in their status colour. Free faces stay at
+    /// full strength and the rest step back, so "who can I call right now" is still one glance —
+    /// but the strip no longer hides people who are simply busy.
     @ViewBuilder
-    private func freeAvatars(now: Date) -> some View {
-        let free = presence.freeColleagues(now: now)
+    private func avatarStrip(now: Date) -> some View {
+        let all = presence.colleagues
 
-        if free.isEmpty {
-            counterBadge(now: now)
+        if all.isEmpty {
+            EmptyView()
         } else {
             HStack(spacing: 4) {
-                ForEach(free.prefix(maxAvatars)) { colleague in
+                ForEach(all.prefix(maxAvatars)) { colleague in
+                    let status = presence.status(for: colleague, now: now)
                     Button {
-                        if let url = ColleagueRoomLink.normalized(colleague.roomURL) {
+                        // Joining is offered from here only when the person is actually
+                        // available; for anyone else the strip just opens the list.
+                        if let url = ColleagueRoomLink.normalized(colleague.roomURL),
+                           ColleaguePresenceStyle.joinIsProminent(for: status.presence) {
                             onJoin(url)
                         } else {
                             model.isExpanded = true
@@ -113,16 +121,20 @@ struct ColleaguesSectionHeaderView: View {
                     } label: {
                         InitialsAvatar(name: colleague.displayName, size: 18)
                             .overlay(
-                                Circle().strokeBorder(ColleaguePresenceStyle.color(for: .free), lineWidth: 1.5)
+                                Circle().strokeBorder(
+                                    ColleaguePresenceStyle.color(for: status.presence),
+                                    lineWidth: 1.5
+                                )
                             )
+                            .opacity(status.presence == .free ? 1 : 0.55)
                     }
                     .buttonStyle(.plain)
-                    .help(freeHelp(for: colleague, now: now))
-                    .accessibilityLabel(freeHelp(for: colleague, now: now))
+                    .help(help(for: colleague, now: now))
+                    .accessibilityLabel(help(for: colleague, now: now))
                 }
 
-                if free.count > maxAvatars {
-                    Text("+\(free.count - maxAvatars)")
+                if all.count > maxAvatars {
+                    Text("+\(all.count - maxAvatars)")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.secondary)
                 }
@@ -130,7 +142,7 @@ struct ColleaguesSectionHeaderView: View {
         }
     }
 
-    private func freeHelp(for colleague: WatchedColleague, now: Date) -> String {
+    private func help(for colleague: WatchedColleague, now: Date) -> String {
         let status = ColleagueStatusFormatter.text(
             for: presence.status(for: colleague, now: now),
             now: now,

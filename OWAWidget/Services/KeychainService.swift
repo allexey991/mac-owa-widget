@@ -41,6 +41,7 @@ struct KeychainService {
     }
 
     static func load(accountID: UUID) throws -> String {
+        DiagnosticLog.event("Keychain access item=accountPassword")
         let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
