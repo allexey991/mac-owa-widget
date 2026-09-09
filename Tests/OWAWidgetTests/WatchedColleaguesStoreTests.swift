@@ -68,13 +68,60 @@ final class WatchedColleaguesStoreTests: XCTestCase {
         XCTAssertTrue(remaining.isEmpty)
     }
 
-    func testListKeepsTheOrderPeopleWereAddedIn() {
+    /// The stored array is the order the section shows, so new people land at the end.
+    func testNewColleaguesAreAppended() {
         let store = makeStore()
-        let base = Date(timeIntervalSince1970: 1_700_000_000)
-        _ = WatchedColleaguesStore.add(colleague("second@example.com", addedAt: base.addingTimeInterval(60)), store: store)
-        _ = WatchedColleaguesStore.add(colleague("first@example.com", addedAt: base), store: store)
+        _ = WatchedColleaguesStore.add(colleague("first@example.com"), store: store)
+        _ = WatchedColleaguesStore.add(colleague("second@example.com"), store: store)
 
         XCTAssertEqual(WatchedColleaguesStore.load(store: store).map(\.email), ["first@example.com", "second@example.com"])
+    }
+
+    func testMovingAColleagueSwapsNeighboursAndPersists() {
+        let store = makeStore()
+        _ = WatchedColleaguesStore.add(colleague("first@example.com"), store: store)
+        _ = WatchedColleaguesStore.add(colleague("second@example.com"), store: store)
+
+        let moved = WatchedColleaguesStore.move(id: "second@example.com", offset: -1, store: store)
+        XCTAssertEqual(moved.map(\.email), ["second@example.com", "first@example.com"])
+        XCTAssertEqual(WatchedColleaguesStore.load(store: makeStore()).map(\.email), ["second@example.com", "first@example.com"])
+    }
+
+    func testMovingPastTheEdgesIsANoOp() {
+        let store = makeStore()
+        _ = WatchedColleaguesStore.add(colleague("first@example.com"), store: store)
+        _ = WatchedColleaguesStore.add(colleague("second@example.com"), store: store)
+
+        XCTAssertEqual(WatchedColleaguesStore.move(id: "first@example.com", offset: -1, store: store).map(\.email),
+                       ["first@example.com", "second@example.com"])
+        XCTAssertEqual(WatchedColleaguesStore.move(id: "second@example.com", offset: 1, store: store).map(\.email),
+                       ["first@example.com", "second@example.com"])
+        XCTAssertEqual(WatchedColleaguesStore.move(id: "nobody@example.com", offset: 1, store: store).count, 2)
+    }
+
+    /// A drag drops one person onto another's row: the dragged colleague takes that slot, in
+    /// both directions, and the rest close ranks.
+    func testDropMovesTheColleagueIntoTheTargetSlot() {
+        let store = makeStore()
+        for email in ["a@example.com", "b@example.com", "c@example.com"] {
+            _ = WatchedColleaguesStore.add(colleague(email), store: store)
+        }
+
+        let draggedDown = WatchedColleaguesStore.move(id: "a@example.com", toIndex: 2, store: store)
+        XCTAssertEqual(draggedDown.map(\.email), ["b@example.com", "c@example.com", "a@example.com"])
+
+        let draggedUp = WatchedColleaguesStore.move(id: "a@example.com", toIndex: 0, store: store)
+        XCTAssertEqual(draggedUp.map(\.email), ["a@example.com", "b@example.com", "c@example.com"])
+    }
+
+    func testDropOutsideTheListIsClamped() {
+        let store = makeStore()
+        _ = WatchedColleaguesStore.add(colleague("a@example.com"), store: store)
+        _ = WatchedColleaguesStore.add(colleague("b@example.com"), store: store)
+
+        XCTAssertEqual(WatchedColleaguesStore.move(id: "a@example.com", toIndex: 99, store: store).map(\.email),
+                       ["b@example.com", "a@example.com"])
+        XCTAssertEqual(WatchedColleaguesStore.move(id: "unknown@example.com", toIndex: 0, store: store).count, 2)
     }
 
     func testNothingIsWrittenInCleartext() throws {

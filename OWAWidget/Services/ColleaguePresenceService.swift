@@ -76,20 +76,13 @@ final class ColleaguePresenceService: ObservableObject {
         return ColleagueStatusCalculator.status(from: availability, now: now)
     }
 
-    /// Rows in display order: free first, unknown last, ties keep the user's own ordering.
-    func sortedColleagues(now: Date) -> [WatchedColleague] {
-        colleagues.enumerated()
-            .sorted { lhs, rhs in
-                let lhsRank = status(for: lhs.element, now: now).presence.sortRank
-                let rhsRank = status(for: rhs.element, now: now).presence.sortRank
-                if lhsRank != rhsRank { return lhsRank < rhsRank }
-                return lhs.offset < rhs.offset
-            }
-            .map(\.element)
+    /// Colleagues who are free right now, in the user's own order. Drives the closed header.
+    func freeColleagues(now: Date) -> [WatchedColleague] {
+        colleagues.filter { status(for: $0, now: now).presence == .free }
     }
 
     func freeCount(now: Date) -> Int {
-        colleagues.filter { status(for: $0, now: now).presence == .free }.count
+        freeColleagues(now: now).count
     }
 
     // MARK: - Refreshing
@@ -205,6 +198,22 @@ final class ColleaguePresenceService: ObservableObject {
             lastAttemptFailed = false
             updateFreshness()
         }
+    }
+
+    /// The list is shown in the order it is stored, so moving a row is the whole feature.
+    func move(_ colleague: WatchedColleague, by offset: Int) {
+        colleagues = WatchedColleaguesStore.move(id: colleague.id, offset: offset, store: store)
+    }
+
+    /// Drop handler: the dragged colleague takes the slot of the row it was dropped on.
+    func reorder(draggedID: String, toIndex index: Int) {
+        guard colleagues.contains(where: { $0.id == draggedID.lowercased() }) else { return }
+        colleagues = WatchedColleaguesStore.move(id: draggedID, toIndex: index, store: store)
+    }
+
+    func canMove(_ colleague: WatchedColleague, by offset: Int) -> Bool {
+        guard let index = colleagues.firstIndex(where: { $0.id == colleague.id }) else { return false }
+        return colleagues.indices.contains(index + offset)
     }
 
     func contains(_ attendee: ResolvedAttendee) -> Bool {

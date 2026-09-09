@@ -61,17 +61,6 @@ enum ColleaguePresence: String, Sendable, Equatable {
         }
     }
 
-    /// Free first, unknown last — the order the section sorts rows in.
-    var sortRank: Int {
-        switch self {
-        case .free: 0
-        case .tentative: 1
-        case .busy: 2
-        case .away: 3
-        case .noData: 4
-        }
-    }
-
     var localizationKey: String {
         switch self {
         case .free: "colleagues.status.free"

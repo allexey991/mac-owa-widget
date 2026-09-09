@@ -31,8 +31,11 @@ enum ColleaguePresenceStyle {
 enum ColleaguesSectionExpansionStore {
     private static let key = "colleaguesSectionExpanded"
 
+    /// Collapsed until asked for. The section costs the timeline about 150 points when open and
+    /// 32 when closed, and the closed header already answers the usual question by showing who is
+    /// free — so the expensive state is the one the user opts into.
     static func load(from defaults: UserDefaults = .standard) -> Bool {
-        guard defaults.object(forKey: key) != nil else { return true }
+        guard defaults.object(forKey: key) != nil else { return false }
         return defaults.bool(forKey: key)
     }
 

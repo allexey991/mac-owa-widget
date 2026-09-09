@@ -349,11 +349,11 @@
 "colleagues.add" = "Добавить коллегу";
 "colleagues.collapse" = "Свернуть раздел";
 "colleagues.expand" = "Развернуть раздел";
-"colleagues.more" = "Ещё %d";
-"colleagues.showLess" = "Показать меньше";
 "colleagues.join" = "Подключиться";
 "colleagues.menu.join" = "Подключиться к комнате";
 "colleagues.menu.edit" = "Изменить ссылку на комнату…";
+"colleagues.menu.moveUp" = "Переместить выше";
+"colleagues.menu.moveDown" = "Переместить ниже";
 "colleagues.menu.remove" = "Убрать из списка";
 "colleagues.empty.title" = "Добавьте коллег, с которыми созваниваетесь чаще всего";
 "colleagues.empty.action" = "Найти в адресной книге";

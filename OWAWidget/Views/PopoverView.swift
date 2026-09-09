@@ -6,6 +6,7 @@ struct PopoverView: View {
     @EnvironmentObject private var localization: LocalizationService
     @EnvironmentObject private var updateCheck: UpdateCheckService
     @EnvironmentObject private var colleagues: ColleaguePresenceService
+    @StateObject private var colleaguesSection = ColleaguesSectionModel()
     @Environment(\.openWindow) private var openWindow
     private var popoverSize: PopoverSize { service.popoverSize }
     private let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
@@ -62,9 +63,22 @@ struct PopoverView: View {
             Divider()
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Under the meeting list, with a height that follows the rows on screen and stops at
+            // the row limit. Thirty watched colleagues cost the timeline exactly what four do.
             if colleagues.isSectionVisible {
                 Divider()
-                ColleaguesSectionView(horizontalPadding: contentHorizontalPadding)
+                ColleaguesSectionHeaderView(
+                    model: colleaguesSection,
+                    horizontalPadding: contentHorizontalPadding,
+                    onJoin: joinColleagueRoom
+                )
+                if colleaguesSection.isExpanded {
+                    ColleaguesPanelView(
+                        model: colleaguesSection,
+                        horizontalPadding: contentHorizontalPadding,
+                        onJoin: joinColleagueRoom
+                    )
+                }
             }
             Divider()
             footer
@@ -75,6 +89,7 @@ struct PopoverView: View {
             PopoverWindowRegistrar()
                 .frame(width: 0, height: 0)
         }
+        .animation(.easeInOut(duration: 0.16), value: colleaguesSection.isExpanded)
         .onEscapeKey(perform: handleEscape)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(localization.tr("app.name"))
@@ -413,6 +428,11 @@ struct PopoverView: View {
         NSApp.terminate(nil)
     }
 
+    private func joinColleagueRoom(_ url: URL) {
+        guard MeetingURLOpener.open(url) else { return }
+        PostJoinDismissController.shared.dismissAfterJoin(context: .popoverContent)
+    }
+
     private func selectEvent(_ event: CalendarEvent) {
         withAnimation(.easeInOut(duration: 0.18)) {
             selectedEvent = event
@@ -435,6 +455,8 @@ struct PopoverView: View {
 
         if selectedEvent != nil {
             closeMeetingDetail()
+        } else if colleaguesSection.handleEscape() {
+            // Handled inside the section: the card or the search box first, the panel after.
         } else if isSearchBarPresented {
             closeSearch()
         } else {

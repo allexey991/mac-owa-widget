@@ -29,11 +29,11 @@ enum WatchedColleaguesStore {
     }
 
     static func load(store: Store = shared) -> [WatchedColleague] {
-        sorted(store.load() ?? [])
+        store.load() ?? []
     }
 
     static func save(_ colleagues: [WatchedColleague], store: Store = shared) {
-        store.save(Array(sorted(colleagues).prefix(maxCount)))
+        store.save(Array(colleagues.prefix(maxCount)))
     }
 
     /// Adds a colleague, or refreshes the address-book fields of one already on the list without
@@ -69,9 +69,27 @@ enum WatchedColleaguesStore {
         return load(store: store)
     }
 
-    /// Oldest first: the list is the user's own ordering by the time they added people, and a
-    /// row that jumps around between openings is hard to aim at.
-    private static func sorted(_ colleagues: [WatchedColleague]) -> [WatchedColleague] {
-        colleagues.sorted { $0.addedAt < $1.addedAt }
+    /// Moves one colleague into the slot another row occupies right now, which is what a drag
+    /// onto that row means. Removing first and inserting at the same index lands the dragged
+    /// person exactly where the target sat, in both directions — no off-by-one correction.
+    static func move(id: String, toIndex index: Int, store: Store = shared) -> [WatchedColleague] {
+        var current = load(store: store)
+        guard let from = current.firstIndex(where: { $0.id == id.lowercased() }) else { return current }
+        let moved = current.remove(at: from)
+        current.insert(moved, at: max(0, min(index, current.count)))
+        save(current, store: store)
+        return load(store: store)
+    }
+
+    /// Moves one colleague one place up or down. The stored order is what the section shows, so
+    /// this is the whole of "reordering" — there is no separate index to keep in step.
+    static func move(id: String, offset: Int, store: Store = shared) -> [WatchedColleague] {
+        var current = load(store: store)
+        guard let index = current.firstIndex(where: { $0.id == id.lowercased() }) else { return current }
+        let target = index + offset
+        guard current.indices.contains(target) else { return current }
+        current.swapAt(index, target)
+        save(current, store: store)
+        return load(store: store)
     }
 }

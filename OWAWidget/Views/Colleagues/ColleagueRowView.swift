@@ -9,8 +9,16 @@ struct ColleagueRowView: View {
     let status: ColleagueStatus
     let isStale: Bool
     let now: Date
+    let canMoveUp: Bool
+    let canMoveDown: Bool
     let onJoin: (URL) -> Void
     let onEdit: () -> Void
+    /// -1 moves the row one place up, +1 one place down.
+    let onMove: (Int) -> Void
+    /// Set while this row is the one being dragged.
+    let isDragging: Bool
+    /// Edge to draw the insertion line on, or `nil` when this row is not the drop target.
+    let dropEdge: VerticalEdge?
     let onRemove: () -> Void
 
     @EnvironmentObject private var localization: LocalizationService
@@ -62,7 +70,15 @@ struct ColleagueRowView: View {
         }
         .padding(.vertical, 5)
         .padding(.horizontal, 14)
-        .background(isHovered ? Color.secondary.opacity(0.06) : Color.clear)
+        .background(rowBackground)
+        .overlay(alignment: dropEdge == .bottom ? .bottom : .top) {
+            // Where the dragged row will land. Drawn on top so it never nudges the layout.
+            if dropEdge != nil {
+                Rectangle()
+                    .fill(Color.accentColor)
+                    .frame(height: 2)
+            }
+        }
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
         .contextMenu { menuContent }
@@ -77,7 +93,17 @@ struct ColleagueRowView: View {
         }
         Button(localization.tr("colleagues.menu.edit")) { onEdit() }
         Divider()
+        Button(localization.tr("colleagues.menu.moveUp")) { onMove(-1) }
+            .disabled(!canMoveUp)
+        Button(localization.tr("colleagues.menu.moveDown")) { onMove(1) }
+            .disabled(!canMoveDown)
+        Divider()
         Button(localization.tr("colleagues.menu.remove")) { onRemove() }
+    }
+
+    private var rowBackground: Color {
+        if isDragging { return Color.accentColor.opacity(0.10) }
+        return isHovered ? Color.secondary.opacity(0.06) : Color.clear
     }
 
     /// Hollow while the data is stale: the timetable still holds, but it may have been rewritten

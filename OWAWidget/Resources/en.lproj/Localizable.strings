@@ -349,11 +349,11 @@
 "colleagues.add" = "Add colleague";
 "colleagues.collapse" = "Collapse section";
 "colleagues.expand" = "Expand section";
-"colleagues.more" = "%d more";
-"colleagues.showLess" = "Show less";
 "colleagues.join" = "Join";
 "colleagues.menu.join" = "Join personal room";
 "colleagues.menu.edit" = "Edit room link…";
+"colleagues.menu.moveUp" = "Move up";
+"colleagues.menu.moveDown" = "Move down";
 "colleagues.menu.remove" = "Remove from list";
 "colleagues.empty.title" = "Add the colleagues you call most often";
 "colleagues.empty.action" = "Search the address book";
