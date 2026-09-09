@@ -55,6 +55,13 @@ OWAWidget - macOS menu bar приложение на Swift 6 и SwiftUI для �
 - `OWAWidget/Views/TimelineMeetingBlockView.swift` - визуальная карточка встречи в таймлайне, включая compact-режим.
 - `OWAWidget/Views/CreateMeeting/` - окно создания встречи: поиск участников через FindPeople, занятость через GetUserAvailabilityInternal, создание через CreateCalendarEvent (OWA JSON API). Ключевые файлы: `CreateMeetingView.swift`, `CreateMeetingViewModel.swift`, `AttendeeSearchField.swift`, `SlotSuggestionsView.swift`.
 - `OWAWidget/Services/MeetingFreeSlotCalculator.swift` - алгоритм поиска свободных 30-мин слотов по MergedFreeBusy строке OWA.
+- `OWAWidget/Views/Colleagues/` - раздел «Коллеги» в поповере: кто из закреплённых коллег свободен прямо сейчас и переход в личную комнату по ссылке.
+- `OWAWidget/Services/ColleaguePresenceService.swift` - занятость коллег. Один запрос `GetUserAvailability` на весь список (адреса уходят массивом), окно - неделя от полуночи. Между обновлениями запросов нет: сетка уже скачана, поэтому текущий статус считается локально из часов и продолжает меняться офлайн. Кэш управляется настройкой, по умолчанию 5 минут.
+
+> **Строки занятости сопоставляются с адресами по позиции.** `OWAClient.parseAvailabilityResponse` делает `zip(emails, mergedStrings)`, а `collectMergedFreeBusy` пропускает пустые `MergedFreeBusy`. Если Exchange не вернул строку для одного ящика, все последующие статусы съедут на человека назад. Поэтому `ColleaguePresenceService` считает несовпадение количества строк неудачным обновлением: показать чужой календарь под чужим именем хуже, чем показать устаревшие данные.
+- `OWAWidget/Services/ColleagueStatusCalculator.swift` - чистый расчёт статуса из строки занятости: текущая ячейка и конец серии. Код `4` - это «нет данных», а не «свободен»; агрегатор в форме создания встречи трактует его иначе, и объединять их нельзя.
+- `OWAWidget/Services/ColleagueStatusFormatter.swift` - текст статуса. Ярлыки без рода («Свободен», «Занят», «Нет на месте»): адресная книга пола не отдаёт, а согласование с именем было бы угадыванием.
+- `OWAWidget/Services/WatchedColleaguesStore.swift` - список коллег и ссылки на их комнаты, через `SecureStore` (имена, адреса и должности из адресной книги).
 - `OWAWidget/Services/AppearanceService.swift` - тема приложения (light/dark/system).
 - `OWAWidget/Services/RecentAttendeesStore.swift` / `RecentLocationsStore.swift` - история участников и локаций для быстрого ввода в форме создания встречи.
 

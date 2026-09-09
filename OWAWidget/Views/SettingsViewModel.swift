@@ -15,6 +15,10 @@ final class SettingsViewModel: ObservableObject {
     @Published var popoverSizePreset: PopoverSize.Preset { didSet { updateUnsavedChanges() } }
     @Published var dimPastMeetingsOnTimeline: Bool { didSet { updateUnsavedChanges() } }
     @Published var globalJoinHotkeyEnabled: Bool { didSet { updateUnsavedChanges() } }
+    @Published var colleaguesSectionEnabled: Bool { didSet { updateUnsavedChanges() } }
+    @Published var colleaguesRefreshOnPopoverOpen: Bool { didSet { updateUnsavedChanges() } }
+    @Published var colleaguesCacheMinutes: Int { didSet { updateUnsavedChanges() } }
+    @Published var colleaguesRowLimit: Int { didSet { updateUnsavedChanges() } }
     @Published var displayTimeZone: DisplayTimeZoneOption { didSet { updateUnsavedChanges() } }
     @Published var launchAtLogin: Bool
     @Published var launchAtLoginRequiresApproval: Bool
@@ -92,6 +96,10 @@ final class SettingsViewModel: ObservableObject {
         self.popoverSizePreset = calendarService.popoverSizePreset
         self.dimPastMeetingsOnTimeline = calendarService.dimPastMeetingsOnTimeline
         self.globalJoinHotkeyEnabled = calendarService.globalJoinHotkeyEnabled
+        self.colleaguesSectionEnabled = calendarService.colleaguesSectionEnabled
+        self.colleaguesRefreshOnPopoverOpen = calendarService.colleaguesRefreshOnPopoverOpen
+        self.colleaguesCacheMinutes = calendarService.colleaguesCacheMinutes
+        self.colleaguesRowLimit = calendarService.colleaguesRowLimit
         self.displayTimeZone = calendarService.displayTimeZoneOption
         self.launchAtLogin = launchAtLoginManager.isEnabled
         self.launchAtLoginRequiresApproval = launchAtLoginManager.requiresApproval
@@ -107,6 +115,10 @@ final class SettingsViewModel: ObservableObject {
             popoverSizePreset: calendarService.popoverSizePreset,
             dimPastMeetingsOnTimeline: calendarService.dimPastMeetingsOnTimeline,
             globalJoinHotkeyEnabled: calendarService.globalJoinHotkeyEnabled,
+            colleaguesSectionEnabled: calendarService.colleaguesSectionEnabled,
+            colleaguesRefreshOnPopoverOpen: calendarService.colleaguesRefreshOnPopoverOpen,
+            colleaguesCacheMinutes: calendarService.colleaguesCacheMinutes,
+            colleaguesRowLimit: calendarService.colleaguesRowLimit,
             displayTimeZone: calendarService.displayTimeZoneOption
         )
         updateUnsavedChanges()
@@ -433,6 +445,10 @@ final class SettingsViewModel: ObservableObject {
         }
         service.dimPastMeetingsOnTimeline = dimPastMeetingsOnTimeline
         service.globalJoinHotkeyEnabled = globalJoinHotkeyEnabled
+        service.colleaguesSectionEnabled = colleaguesSectionEnabled
+        service.colleaguesRefreshOnPopoverOpen = colleaguesRefreshOnPopoverOpen
+        service.colleaguesCacheMinutes = colleaguesCacheMinutes
+        service.colleaguesRowLimit = colleaguesRowLimit
         service.displayTimeZoneOption = displayTimeZone
         service.setMeetingEngagementScope(meetingEngagementScope)
         service.setMeetingEngagementPeriod(meetingEngagementDefaultPeriod)
@@ -482,6 +498,10 @@ final class SettingsViewModel: ObservableObject {
         let popoverSizePreset: PopoverSize.Preset
         let dimPastMeetingsOnTimeline: Bool
         let globalJoinHotkeyEnabled: Bool
+        let colleaguesSectionEnabled: Bool
+        let colleaguesRefreshOnPopoverOpen: Bool
+        let colleaguesCacheMinutes: Int
+        let colleaguesRowLimit: Int
         let displayTimeZone: DisplayTimeZoneOption
     }
 
@@ -498,6 +518,10 @@ final class SettingsViewModel: ObservableObject {
             popoverSizePreset: popoverSizePreset,
             dimPastMeetingsOnTimeline: dimPastMeetingsOnTimeline,
             globalJoinHotkeyEnabled: globalJoinHotkeyEnabled,
+            colleaguesSectionEnabled: colleaguesSectionEnabled,
+            colleaguesRefreshOnPopoverOpen: colleaguesRefreshOnPopoverOpen,
+            colleaguesCacheMinutes: colleaguesCacheMinutes,
+            colleaguesRowLimit: colleaguesRowLimit,
             displayTimeZone: displayTimeZone
         )
     }

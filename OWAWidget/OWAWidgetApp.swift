@@ -15,6 +15,7 @@ struct OWAWidgetApp: App {
     @StateObject private var calendarService = CalendarService()
     @StateObject private var updateCheckService = UpdateCheckService()
     @StateObject private var appearanceService = AppearanceService()
+    @StateObject private var colleaguePresenceService = ColleaguePresenceService()
 
     // Static: one delegate instance survives across App struct re-evaluations.
     private static let notificationDelegate = AppNotificationDelegate()
@@ -32,10 +33,12 @@ struct OWAWidgetApp: App {
                 .environmentObject(localizationService)
                 .environmentObject(updateCheckService)
                 .environmentObject(appearanceService)
+                .environmentObject(colleaguePresenceService)
                 .environment(\.locale, localizationService.locale)
                 .onAppear {
                     setupNotificationDelegate()
                     syncLocalization()
+                    colleaguePresenceService.attach(calendarService)
                 }
                 .onChange(of: localizationService.selectedLanguage) { _ in
                     syncLocalization()
@@ -50,6 +53,9 @@ struct OWAWidgetApp: App {
                     updateCheckService.start()
                     appearanceService.applyOnLaunch()
                     setupGlobalHotkeyJoin()
+                    // The menu-bar label renders at launch, ahead of the popover: wiring here
+                    // means the colleagues section is ready the first time the popover opens.
+                    colleaguePresenceService.attach(calendarService)
                 }
         }
         .menuBarExtraStyle(.window)

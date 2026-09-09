@@ -132,6 +132,34 @@ struct PreferencesView: View {
                 )
             }
 
+            Section(localization.tr("preferences.colleagues.section")) {
+                Toggle(
+                    localization.tr("preferences.colleagues.enabled"),
+                    isOn: $vm.colleaguesSectionEnabled
+                )
+                Toggle(
+                    localization.tr("preferences.colleagues.refreshOnOpen"),
+                    isOn: $vm.colleaguesRefreshOnPopoverOpen
+                )
+                .disabled(!vm.colleaguesSectionEnabled)
+                Picker(localization.tr("preferences.colleagues.cache"), selection: $vm.colleaguesCacheMinutes) {
+                    ForEach(ColleagueRefreshPolicy.cacheMinuteOptions, id: \.self) { minutes in
+                        Text(localization.minutes(minutes)).tag(minutes)
+                    }
+                }
+                .disabled(!vm.colleaguesSectionEnabled)
+                Picker(localization.tr("preferences.colleagues.rows"), selection: $vm.colleaguesRowLimit) {
+                    ForEach([3, 4, 6, 8], id: \.self) { rows in
+                        Text("\(rows)").tag(rows)
+                    }
+                }
+                .disabled(!vm.colleaguesSectionEnabled)
+                Text(localization.tr("preferences.colleagues.hint"))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Section(localization.tr("preferences.notifications.section")) {
                 Picker(localization.tr("preferences.notifications.remind"), selection: $vm.notificationLeadMinutes) {
                     ForEach(leadOptions, id: \.value) { opt in

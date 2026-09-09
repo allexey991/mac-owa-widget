@@ -137,6 +137,10 @@ final class CalendarService: ObservableObject {
     private let menuBarDisplayModeKey = "menuBarDisplayMode"
     private let dimPastMeetingsOnTimelineKey = "dimPastMeetingsOnTimeline"
     private let globalJoinHotkeyEnabledKey = "globalJoinHotkeyEnabled"
+    private let colleaguesSectionEnabledKey = "colleaguesSectionEnabled"
+    private let colleaguesRefreshOnPopoverOpenKey = "colleaguesRefreshOnPopoverOpen"
+    private let colleaguesCacheMinutesKey = "colleaguesCacheMinutes"
+    private let colleaguesRowLimitKey = "colleaguesRowLimit"
     private let displayTimeZoneKey = AppTimeZone.storageKey
 
     var syncInterval: TimeInterval {
@@ -195,6 +199,53 @@ final class CalendarService: ObservableObject {
             return mode
         }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: menuBarDisplayModeKey) }
+    }
+
+    /// When `true` (default), the popover shows the colleagues section under the meeting list.
+    var colleaguesSectionEnabled: Bool {
+        get {
+            if UserDefaults.standard.object(forKey: colleaguesSectionEnabledKey) == nil {
+                return true
+            }
+            return UserDefaults.standard.bool(forKey: colleaguesSectionEnabledKey)
+        }
+        set { UserDefaults.standard.set(newValue, forKey: colleaguesSectionEnabledKey) }
+    }
+
+    /// When `true` (default), opening the popover refreshes colleague availability — subject to
+    /// the cache below, so a burst of openings still costs one request.
+    var colleaguesRefreshOnPopoverOpen: Bool {
+        get {
+            if UserDefaults.standard.object(forKey: colleaguesRefreshOnPopoverOpenKey) == nil {
+                return true
+            }
+            return UserDefaults.standard.bool(forKey: colleaguesRefreshOnPopoverOpenKey)
+        }
+        set { UserDefaults.standard.set(newValue, forKey: colleaguesRefreshOnPopoverOpenKey) }
+    }
+
+    /// How long a downloaded availability grid is reused before another request is worth making.
+    /// It bounds requests, not accuracy: the current status is recomputed locally from the grid.
+    var colleaguesCacheMinutes: Int {
+        get {
+            let stored = UserDefaults.standard.integer(forKey: colleaguesCacheMinutesKey)
+            return stored > 0 ? stored : ColleagueRefreshPolicy.defaultCacheMinutes
+        }
+        set { UserDefaults.standard.set(newValue, forKey: colleaguesCacheMinutesKey) }
+    }
+
+    /// Rows the section shows before "Ещё N". Four keeps the section at ~150 pt of popover height.
+    var colleaguesRowLimit: Int {
+        get {
+            let stored = UserDefaults.standard.integer(forKey: colleaguesRowLimitKey)
+            return stored > 0 ? stored : 4
+        }
+        set { UserDefaults.standard.set(newValue, forKey: colleaguesRowLimitKey) }
+    }
+
+    /// First account able to answer availability questions about other mailboxes, or `nil`.
+    var colleagueAvailabilityAccount: CalendarAccount? {
+        accounts.first { $0.accountType.supportsColleagueAvailability }
     }
 
     /// When `true` (default), ended meetings on today’s timeline render at reduced opacity.
@@ -517,6 +568,22 @@ final class CalendarService: ObservableObject {
             guard let first = try await group.next() else { return [] }
             return first
         }
+    }
+
+    /// Free/busy for arbitrary mailboxes, used by the colleagues section.
+    ///
+    /// One call carries every address, so watching five people costs one request rather than five.
+    func userAvailability(
+        emails: [String],
+        from start: Date,
+        to end: Date,
+        accountID: UUID
+    ) async throws -> [AttendeeAvailability] {
+        guard !emails.isEmpty else { return [] }
+        guard let provider = providers.first(where: { $0.account.id == accountID }) else {
+            throw CalendarProviderError.notSupported
+        }
+        return try await provider.getUserAvailability(emails: emails, from: start, to: end)
     }
 
     func findFreeSlots(

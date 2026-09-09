@@ -5,6 +5,7 @@ struct PopoverView: View {
     @EnvironmentObject var service: CalendarService
     @EnvironmentObject private var localization: LocalizationService
     @EnvironmentObject private var updateCheck: UpdateCheckService
+    @EnvironmentObject private var colleagues: ColleaguePresenceService
     @Environment(\.openWindow) private var openWindow
     private var popoverSize: PopoverSize { service.popoverSize }
     private let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
@@ -61,6 +62,10 @@ struct PopoverView: View {
             Divider()
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if colleagues.isSectionVisible {
+                Divider()
+                ColleaguesSectionView(horizontalPadding: contentHorizontalPadding)
+            }
             Divider()
             footer
         }
@@ -73,6 +78,9 @@ struct PopoverView: View {
         .onEscapeKey(perform: handleEscape)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(localization.tr("app.name"))
+        .onAppear {
+            colleagues.popoverDidAppear()
+        }
         .onDisappear {
             resetMeetingDetailState()
             searchQuery = ""
@@ -106,6 +114,7 @@ struct PopoverView: View {
             } else {
                 Button {
                     service.syncNow()
+                    colleagues.refresh()
                 } label: {
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 13))

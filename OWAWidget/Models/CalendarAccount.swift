@@ -35,6 +35,18 @@ enum AccountType: String, Codable, Sendable, CaseIterable {
         case .googleCalendar, .eventKit: false
         }
     }
+
+    /// Whether an account of this type can answer "is this colleague busy right now".
+    ///
+    /// Free/busy for other mailboxes is an Exchange question. EventKit hands over the calendars
+    /// macOS syncs and knows nothing about anyone else's, so the colleagues section is hidden for
+    /// those accounts rather than shown permanently empty.
+    var supportsColleagueAvailability: Bool {
+        switch self {
+        case .owa: true
+        case .googleCalendar, .eventKit: false
+        }
+    }
 }
 
 struct CalendarAccount: Identifiable, Codable, Sendable, Hashable {
