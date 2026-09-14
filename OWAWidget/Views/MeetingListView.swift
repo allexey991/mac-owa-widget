@@ -237,50 +237,47 @@ struct MeetingListView: View {
         return "slot-\(sectionKey)-\(slotKey)"
     }
 
-    private func startOfSlot(containing date: Date, calendar: Calendar) -> Date? {
-        let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: date)
-        guard
-            let hour = components.hour,
-            let minute = components.minute
-        else {
-            return nil
-        }
-
-        let snappedMinute = (minute / slotDurationMinutes) * slotDurationMinutes
-        return calendar.date(
-            from: DateComponents(
-                year: components.year,
-                month: components.month,
-                day: components.day,
-                hour: hour,
-                minute: snappedMinute,
-                second: 0
-            )
-        )
-    }
 
     private func scrollToCurrentSlotIfNeeded(proxy: ScrollViewProxy) {
         guard !hasAutoScrolledToCurrentSlot else { return }
         guard let id = scrollAnchorSlotID() else { return }
 
         hasAutoScrolledToCurrentSlot = true
+        // Deliberately not animated. This runs as the list appears, so there is no previous
+        // position for the user to have seen it travel from — and when the list appears as a
+        // page sliding in from the side, an animated scroll runs against that slide over the
+        // same fifth of a second, visibly scrolling the day while it is still flying in and
+        // risking a short landing on a frame that has not arrived yet.
         DispatchQueue.main.async {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                proxy.scrollTo(id, anchor: .top)
-            }
+            proxy.scrollTo(id, anchor: .top)
         }
     }
 
-    // Returns the slot 2 hours before current time so that after scrolling
-    // the current moment appears lower on the timeline with more context above.
+    // Returns the slot 2 hours before the current clock time, so that after scrolling the current
+    // moment sits lower on the timeline with context above it.
+    //
+    // Computed for whichever day is on screen, not only for today. Paging rebuilds the list, so
+    // any other day would otherwise open at midnight: look at today around 9am, swipe to
+    // tomorrow, and the timeline drops to the small hours instead of staying where the eye was.
+    // Anchoring every day at the same clock position keeps the grid still under a swipe.
     private func scrollAnchorSlotID() -> String? {
-        let now = Date()
+        guard let section = sections.first else { return nil }
+
         let calendar = AppTimeZone.calendar
-        guard let section = sections.first(where: { calendar.isDate($0.date, inSameDayAs: now) }) else {
-            return nil
-        }
-        let anchorTime = now.addingTimeInterval(-2 * 60 * 60)
-        guard let slotStart = startOfSlot(containing: anchorTime, calendar: calendar) else {
+        let now = Date()
+        let nowMinutes = calendar.component(.hour, from: now) * 60 + calendar.component(.minute, from: now)
+        // Clamped, not wrapped: two hours before 00:30 is yesterday evening, and projecting that
+        // clock time onto this day would land the user at the bottom of it.
+        let anchorMinutes = max(0, nowMinutes - 120)
+        let snappedMinutes = (anchorMinutes / slotDurationMinutes) * slotDurationMinutes
+
+        // Built by adding minutes to the day's start, exactly the way the slots themselves are, so
+        // the id still matches on a day that gains or loses an hour to DST.
+        guard let slotStart = calendar.date(
+            byAdding: .minute,
+            value: snappedMinutes,
+            to: calendar.startOfDay(for: section.date)
+        ) else {
             return nil
         }
         return slotID(for: section.date, slotStart: slotStart)

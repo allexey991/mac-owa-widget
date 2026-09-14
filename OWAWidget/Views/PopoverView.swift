@@ -14,6 +14,8 @@ struct PopoverView: View {
     private var fullVersion: String { "\(appVersion).\(appBuild)" }
     let contentHorizontalPadding: CGFloat = 12
     @State private var selectedDayOffset: Int = 0
+    /// Direction of the last day step, which is what the page slide follows.
+    @State private var isPagingForward: Bool = true
     @State private var selectedEvent: CalendarEvent? = nil
     @State private var searchQuery: String = ""
     @State private var isSearchBarPresented: Bool = false
@@ -46,42 +48,73 @@ struct PopoverView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            if isSearchBarPresented {
+        // The meeting card floats over the entire popover — colleagues section and footer
+        // included — rather than only over the timeline. Expanding the colleagues block then
+        // costs the card no height at all: it always opens against the full window.
+        ZStack(alignment: .bottom) {
+            VStack(spacing: 0) {
+                header
+                if isSearchBarPresented {
+                    Divider()
+                    MeetingSearchField(
+                        text: $searchQuery,
+                        isFocused: $isSearchFieldFocused,
+                        placeholder: localization.tr("search.placeholder"),
+                        onClear: { searchQuery = "" },
+                        onCancel: { closeSearch() }
+                    )
+                    .padding(.horizontal, contentHorizontalPadding)
+                    .padding(.vertical, 8)
+                }
                 Divider()
-                MeetingSearchField(
-                    text: $searchQuery,
-                    isFocused: $isSearchFieldFocused,
-                    placeholder: localization.tr("search.placeholder"),
-                    onClear: { searchQuery = "" },
-                    onCancel: { closeSearch() }
-                )
-                .padding(.horizontal, contentHorizontalPadding)
-                .padding(.vertical, 8)
-            }
-            Divider()
-            content
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // Under the meeting list, with a height that follows the rows on screen and stops at
-            // the row limit. Thirty watched colleagues cost the timeline exactly what four do.
-            if colleagues.isSectionVisible {
-                Divider()
-                ColleaguesSectionHeaderView(
-                    model: colleaguesSection,
-                    horizontalPadding: contentHorizontalPadding,
-                    onJoin: joinColleagueRoom
-                )
-                if colleaguesSection.isExpanded {
-                    ColleaguesPanelView(
+                content
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Under the meeting list, with a height that follows the rows on screen and stops at
+                // the row limit. Thirty watched colleagues cost the timeline exactly what four do.
+                if colleagues.isSectionVisible {
+                    Divider()
+                    ColleaguesSectionHeaderView(
                         model: colleaguesSection,
                         horizontalPadding: contentHorizontalPadding,
                         onJoin: joinColleagueRoom
                     )
+                    if colleaguesSection.isExpanded {
+                        ColleaguesPanelView(
+                            model: colleaguesSection,
+                            horizontalPadding: contentHorizontalPadding,
+                            onJoin: joinColleagueRoom
+                        )
+                    }
+                }
+                Divider()
+                footer
+            }
+            .accessibilityHidden(selectedEvent != nil)
+            .overlay {
+                if selectedEvent != nil {
+                    // The dimmed area doubles as the dismiss target: clicking beside the card
+                    // closes it, the way a sheet behaves. It also stops a click from landing on
+                    // the timeline (or a colleague row) underneath.
+                    Color(nsColor: .windowBackgroundColor)
+                        .opacity(0.26)
+                        .contentShape(Rectangle())
+                        .onTapGesture { closeMeetingDetail() }
+                        .transition(.opacity)
+                        .accessibilityHidden(true)
                 }
             }
-            Divider()
-            footer
+
+            if let selectedEvent {
+                MeetingDetailPanelView(event: selectedEvent) {
+                    closeMeetingDetail()
+                }
+                .padding(.horizontal, contentHorizontalPadding)
+                .padding(.bottom, 8)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .zIndex(1)
+                .accessibilityAddTraits(.isModal)
+                .accessibilitySortPriority(100)
+            }
         }
         .frame(width: CGFloat(popoverSize.width), height: CGFloat(popoverSize.height))
         .background(Color(nsColor: .windowBackgroundColor))
@@ -90,7 +123,12 @@ struct PopoverView: View {
                 .frame(width: 0, height: 0)
         }
         .animation(.easeInOut(duration: 0.16), value: colleaguesSection.isExpanded)
+        .animation(.easeInOut(duration: 0.18), value: selectedEvent?.id)
         .onEscapeKey(perform: handleEscape)
+        .onHorizontalPagingSwipe(
+            isEnabled: { isDayPagingBySwipeEnabled },
+            perform: handlePagingSwipe
+        )
         .accessibilityElement(children: .contain)
         .accessibilityLabel(localization.tr("app.name"))
         .onAppear {
@@ -240,102 +278,108 @@ struct PopoverView: View {
     }
 
     private var dayTimelineContent: some View {
-        ZStack(alignment: .bottom) {
-            Group {
-                if isSearching {
-                    SearchResultsView(
-                        groups: searchResultGroups,
-                        contentHorizontalPadding: contentHorizontalPadding,
-                        selectedEventID: selectedEvent?.id,
-                        onSelect: selectEvent
+        Group {
+            if isSearching {
+                SearchResultsView(
+                    groups: searchResultGroups,
+                    contentHorizontalPadding: contentHorizontalPadding,
+                    selectedEventID: selectedEvent?.id,
+                    onSelect: selectEvent
+                )
+            } else {
+                VStack(spacing: 0) {
+                    dateNavBar
+                    Divider()
+                    UpdateAvailableBannerView(
+                        updateCheck: updateCheck,
+                        horizontalPadding: contentHorizontalPadding
                     )
-                } else {
-                    VStack(spacing: 0) {
-                        dateNavBar
+                    if updateCheck.availableUpdate != nil {
                         Divider()
-                        UpdateAvailableBannerView(
-                            updateCheck: updateCheck,
-                            horizontalPadding: contentHorizontalPadding
-                        )
-                        if updateCheck.availableUpdate != nil {
-                            Divider()
-                        }
-                        if selectedDayOffset == 0 && !nextEvents.isEmpty {
-                            NextMeetingBannerView(
-                                events: nextEvents,
-                                horizontalPadding: contentHorizontalPadding,
-                                onSelect: selectEvent
-                            )
-                            Divider().padding(.top, 8)
-                        }
-                        MeetingListView(
-                            sections: eventSections,
-                            contentHorizontalPadding: contentHorizontalPadding,
-                            selectedEventID: selectedEvent?.id,
-                            onSelect: selectEvent
-                        )
                     }
+                    // Both days are on screen for the length of the slide, so they are stacked
+                    // rather than laid out in sequence: a VStack would briefly squeeze each into
+                    // half the height. Clipping keeps the leaving day inside the timeline area.
+                    ZStack(alignment: .top) {
+                        dayBody
+                            .id(selectedDayOffset)
+                            .transition(dayPageTransition)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
                 }
-            }
-            .accessibilityHidden(selectedEvent != nil)
-            .overlay {
-                if selectedEvent != nil {
-                    // The dimmed area doubles as the dismiss target: clicking beside the card
-                    // closes it, the way a sheet behaves. It also stops a click from landing on
-                    // the timeline underneath and silently switching meetings.
-                    Color(nsColor: .windowBackgroundColor)
-                        .opacity(0.26)
-                        .contentShape(Rectangle())
-                        .onTapGesture { closeMeetingDetail() }
-                        .transition(.opacity)
-                        .accessibilityHidden(true)
-                }
-            }
-
-            if let selectedEvent {
-                MeetingDetailPanelView(event: selectedEvent) {
-                    closeMeetingDetail()
-                }
-                .padding(.horizontal, contentHorizontalPadding)
-                .padding(.bottom, 8)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-                .zIndex(1)
-                .accessibilityAddTraits(.isModal)
-                .accessibilitySortPriority(100)
             }
         }
-        .animation(.easeInOut(duration: 0.18), value: selectedEvent?.id)
     }
 
+    /// Everything that belongs to one particular day, and therefore everything that slides when
+    /// the day changes. The bars above it stay put.
+    private var dayBody: some View {
+        VStack(spacing: 0) {
+            if selectedDayOffset == 0 && !nextEvents.isEmpty {
+                NextMeetingBannerView(
+                    events: nextEvents,
+                    horizontalPadding: contentHorizontalPadding,
+                    onSelect: selectEvent
+                )
+                Divider().padding(.top, 8)
+            }
+            MeetingListView(
+                sections: eventSections,
+                contentHorizontalPadding: contentHorizontalPadding,
+                selectedEventID: selectedEvent?.id,
+                onSelect: selectEvent
+            )
+        }
+    }
+
+    /// The new day arrives from the side it lies on and pushes the old one off the opposite
+    /// edge, so the motion reads as a page moving under the swipe rather than a plain redraw.
+    private var dayPageTransition: AnyTransition {
+        let arrivingEdge: Edge = isPagingForward ? .trailing : .leading
+        let leavingEdge: Edge = isPagingForward ? .leading : .trailing
+        return .asymmetric(
+            insertion: .move(edge: arrivingEdge).combined(with: .opacity),
+            removal: .move(edge: leavingEdge).combined(with: .opacity)
+        )
+    }
+
+    /// The row carries no horizontal padding of its own: each arrow folds that padding into its
+    /// own hit rectangle instead, so the two targets run all the way to the popover's edges.
     private var dateNavBar: some View {
-        HStack {
-            Button {
-                if DateNavBarPolicy.canGoToPreviousDay(selectedDayOffset: selectedDayOffset, minDayOffset: minDayOffset) {
-                    selectedDayOffset -= 1
-                    resetMeetingDetailState()
+        HStack(spacing: 0) {
+            DayNavArrowButton(
+                direction: .previous,
+                isEnabled: DateNavBarPolicy.canGoToPreviousDay(
+                    selectedDayOffset: selectedDayOffset,
+                    minDayOffset: minDayOffset
+                ),
+                accessibilityLabel: localization.tr("a11y.nav.previous.day"),
+                innerInset: contentHorizontalPadding
+            ) {
+                goToDay(offsetBy: -1)
+            }
+
+            Spacer(minLength: 0)
+
+            // The label travels with the page. On a day with no meetings it is the only thing
+            // that moves, and without it a swipe there would look like nothing happened.
+            ZStack {
+                HStack(spacing: 6) {
+                    Text(localization.daySectionLabel(for: selectedDate, calendar: AppTimeZone.calendar))
+                        .font(.system(size: 12, weight: .semibold))
+                    TimeZoneBadge()
                 }
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 11, weight: .medium))
+                .id(selectedDayOffset)
+                .transition(dayPageTransition)
             }
-            .buttonStyle(.plain)
-            .disabled(!DateNavBarPolicy.canGoToPreviousDay(selectedDayOffset: selectedDayOffset, minDayOffset: minDayOffset))
-            .accessibilityLabel(localization.tr("a11y.nav.previous.day"))
+            .clipped()
 
-            Spacer()
-
-            HStack(spacing: 6) {
-                Text(localization.daySectionLabel(for: selectedDate, calendar: AppTimeZone.calendar))
-                    .font(.system(size: 12, weight: .semibold))
-                TimeZoneBadge()
-            }
-
-            Spacer()
+            Spacer(minLength: 0)
 
             if DateNavBarPolicy.shouldShowJumpToToday(selectedDayOffset: selectedDayOffset) {
                 Button {
-                    selectedDayOffset = 0
-                    resetMeetingDetailState()
+                    goToToday()
                 } label: {
                     let icon = selectedDayOffset < 0 ? "arrow.uturn.forward.circle" : "arrow.uturn.backward.circle"
                     Label(localization.tr("popover.nav.today"), systemImage: icon)
@@ -344,25 +388,22 @@ struct PopoverView: View {
                 .buttonStyle(.plain)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Color.accentColor)
-                .padding(.trailing, 2)
                 .accessibilityLabel(localization.tr("a11y.nav.today"))
             }
 
-            Button {
-                if DateNavBarPolicy.canGoToNextDay(selectedDayOffset: selectedDayOffset, maxDayOffset: maxDayOffset) {
-                    selectedDayOffset += 1
-                    resetMeetingDetailState()
-                }
-            } label: {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .medium))
+            DayNavArrowButton(
+                direction: .next,
+                isEnabled: DateNavBarPolicy.canGoToNextDay(
+                    selectedDayOffset: selectedDayOffset,
+                    maxDayOffset: maxDayOffset
+                ),
+                accessibilityLabel: localization.tr("a11y.nav.next.day"),
+                innerInset: contentHorizontalPadding
+            ) {
+                goToDay(offsetBy: 1)
             }
-            .buttonStyle(.plain)
-            .disabled(!DateNavBarPolicy.canGoToNextDay(selectedDayOffset: selectedDayOffset, maxDayOffset: maxDayOffset))
-            .accessibilityLabel(localization.tr("a11y.nav.next.day"))
         }
-        .padding(.horizontal, contentHorizontalPadding)
-        .padding(.vertical, 6)
+        .padding(.vertical, 3)
         .accessibilitySortPriority(selectedEvent == nil ? 10 : 0)
     }
 
@@ -431,6 +472,56 @@ struct PopoverView: View {
     private func joinColleagueRoom(_ url: URL) {
         guard MeetingURLOpener.open(url) else { return }
         PostJoinDismissController.shared.dismissAfterJoin(context: .popoverContent)
+    }
+
+    /// Single entry point for stepping the day, shared by the arrows, the swipe and the "today"
+    /// button, so the bounds and the slide are decided in one place.
+    private func goToDay(offsetBy delta: Int) {
+        let target = selectedDayOffset + delta
+        guard target != selectedDayOffset, target >= minDayOffset, target <= maxDayOffset else { return }
+
+        // The direction is committed in its own render pass, before the day itself moves, and
+        // that ordering is the whole point. A transition has two halves, and the removal half
+        // belongs to the page being torn down — which carries whichever transition was attached
+        // to it the last time it was rendered. Flipping the direction in the same pass that
+        // changes the id would leave the outgoing page with the previous step's removal edge, so
+        // the first swipe back after a swipe forward would send both pages off the same side.
+        // Letting the current page re-render with the new direction first closes that window.
+        isPagingForward = delta > 0
+        DispatchQueue.main.async {
+            withAnimation(.easeOut(duration: 0.22)) {
+                selectedDayOffset = target
+            }
+        }
+        resetMeetingDetailState()
+    }
+
+    private func goToToday() {
+        goToDay(offsetBy: -selectedDayOffset)
+    }
+
+    private func handlePagingSwipe(_ step: HorizontalSwipePagingPolicy.Step) {
+        let delta = step == .previous ? -1 : 1
+        let target = selectedDayOffset + delta
+        // A swipe is a blind gesture: without a tick the user cannot tell a refused step at the
+        // range's edge from one that simply did not register. So the two feel different.
+        guard target >= minDayOffset, target <= maxDayOffset else {
+            DayPagingHaptics.pageRefused()
+            return
+        }
+        goToDay(offsetBy: delta)
+        DayPagingHaptics.pageTurned()
+    }
+
+    /// Swiping pages the date bar, so it is live exactly when that bar is on screen: not behind
+    /// the modal meeting card, not while search replaces the day view, and not on the empty or
+    /// error states, which show no date at all.
+    private var isDayPagingBySwipeEnabled: Bool {
+        guard selectedEvent == nil, !isSearching, !service.accounts.isEmpty else { return false }
+        return !SyncPresentationPolicy.shouldShowErrorState(
+            syncStatus: service.syncStatus,
+            eventsCount: service.events.count
+        )
     }
 
     private func selectEvent(_ event: CalendarEvent) {
