@@ -1,3 +1,45 @@
+## v1.0.51 - 2026-09-14
+
+### RU
+
+#### Что изменилось
+
+- По стрелкам переключения дат наконец можно попасть с первого раза. Раньше нажатие засчитывалось только точно по самому значку — области было около 7×11 точек, и промахнуться было легче, чем попасть. Теперь кнопка занимает 40×30 точек и дотягивается до края окна, а под курсором подсвечивается, так что видно, куда целиться. Сама стрелка осталась там же и того же размера. Спасибо за обратную связь — без неё это бы так и осталось незамеченным.
+- Даты теперь листаются свайпом двумя пальцами по трекпаду: вправо — предыдущий день, влево — следующий, как «назад» и «вперёд» в браузере. Вертикальная прокрутка расписания не задета, и полоса событий на весь день по-прежнему прокручивается сама по себе.
+- Смена дня показывается перелистыванием страницы, а на трекпадах с Force Touch отдаётся щелчком. Свайп — жест вслепую: ни кнопка не подсвечивается, ни курсор никуда не движется, и без отклика непонятно, засчитался он или нет. Упор в край доступного диапазона (неделя назад, месяц вперёд) ощущается иначе, чем удачное перелистывание.
+- Переключение дня оставляет расписание на том же времени суток. Открыли сегодняшний день около девяти утра, перешли на завтра — увидите снова примерно девять, а не начало суток.
+
+#### Установка
+
+1. Переместите `OWAWidget.app` в `/Applications`.
+2. Снимите quarantine-атрибуты (нужно только при первой установке):
+
+```bash
+xattr -dr com.apple.quarantine /Applications/OWAWidget.app
+```
+
+3. Все последующие обновления устанавливаются автоматически через кнопку «Установить» внутри приложения.
+
+### EN
+
+#### What's Changed
+
+- The date arrows can finally be hit on the first try. A click used to register only on the glyph itself — an area of roughly 7×11 points, easier to miss than to hit. The button is now 40×30 points and reaches the window's edge, and it lights up under the pointer so you can see what you are aiming at. The arrow itself sits where it always did, at the same size. Thanks for the feedback — this would have gone unnoticed otherwise.
+- Dates can now be paged with a two-finger swipe on the trackpad: right for the previous day, left for the next, the way back and forward work in a browser. Scrolling the timeline vertically is untouched, and the all-day strip still scrolls on its own.
+- A day change is shown as a page turn, and answered with a tap on Force Touch trackpads. A swipe is a blind gesture: no button lights up, no cursor moves, and without an answer there is no telling whether it registered. Running into the end of the available range (a week back, a month ahead) feels different from a successful turn.
+- Changing the day keeps the timeline at the same time of day. Look at today around nine in the morning, move to tomorrow, and you land near nine again rather than at midnight.
+
+#### Installation
+
+1. Move `OWAWidget.app` to `/Applications`.
+2. Remove the quarantine attributes (only needed on the first install):
+
+```bash
+xattr -dr com.apple.quarantine /Applications/OWAWidget.app
+```
+
+3. All subsequent updates install automatically via the "Install" button inside the app.
+
 ## v1.0.50 - 2026-09-03
 
 ### RU
