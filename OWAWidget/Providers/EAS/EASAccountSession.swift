@@ -192,10 +192,33 @@ actor EASAccountSession {
             timeZone: timeZone
         )
         syncKey = newKey
-        // The created item is not added to the local map here: the next sync returns it as the
-        // server stored it, which is the version the rest of the app should see.
+
+        // The server does not send a client-created item back on the next Sync: it handed out
+        // the ServerId in the Add response and considers this device to know about it already.
+        // So it has to be fetched explicitly — otherwise the meeting exists on the server and
+        // in OWA, but never reaches the widget until something forces a full resynchronisation.
+        if let serverId {
+            do {
+                let (fetchedKey, created) = try await client.fetchItem(
+                    collectionId: collectionId,
+                    syncKey: syncKey,
+                    serverId: serverId,
+                    truncationSize: Self.bodyTruncationSize
+                )
+                syncKey = fetchedKey
+                if let created { items[serverId] = created }
+            } catch {
+                // The meeting is created either way; failing here would report an error for
+                // work that succeeded. It will appear on the next full resynchronisation.
+                DiagnosticLog.event("EAS created event fetch-back failed")
+            }
+        }
+
         persist()
-        log.info("EAS created event \(serverId == nil ? "without" : "with", privacy: .public) a ServerId")
+        // Открытым текстом: иначе единственное подтверждение, что встреча создана, остаётся
+        // в канале, который не читается. ServerId — идентификатор элемента на сервере, не
+        // содержимое встречи.
+        DiagnosticLog.event("EAS created event serverId=\(serverId ?? "none") attendees=\(requiredAttendees.count + optionalAttendees.count)")
     }
 
     /// Provisioning and folder resolution, shared by every operation that needs them.

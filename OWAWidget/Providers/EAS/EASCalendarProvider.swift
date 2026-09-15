@@ -130,7 +130,7 @@ actor EASCalendarProvider: CalendarProvider {
                 instanceId: event.instanceKey,
                 response: EASMeetingResponse(action)
             )
-            log.info("EAS meeting response sent")
+            DiagnosticLog.event("EAS meeting response sent occurrence=\(event.instanceKey != nil)")
         } catch {
             throw EASErrorBridge.owaError(from: error, context: "respondToMeeting")
         }

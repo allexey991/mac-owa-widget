@@ -236,7 +236,9 @@ final class EASCreateMeetingTests: XCTestCase {
             requiredAttendees: [], optionalAttendees: [], timeZone: moscow
         )
 
-        XCTAssertEqual(store.load()?.syncKey, "7c", "losing it would break the next ordinary sync")
+        // Ключ продвигается дважды: сам Add, затем дозагрузка созданного элемента —
+        // Fetch это тоже Sync. Потеря любого из них сломала бы следующую обычную синхронизацию.
+        XCTAssertEqual(store.load()?.syncKey, "7cf", "losing it would break the next ordinary sync")
     }
 
     func testCreationFailurePropagates() async throws {
@@ -262,5 +264,60 @@ final class EASCreateMeetingTests: XCTestCase {
                 return XCTFail("unexpected error \(error)")
             }
         }
+    }
+
+    /// ActiveSync не присылает обратно элемент, созданный этим же устройством: `ServerId`
+    /// был отдан в ответе на `Add`, и сервер считает, что устройство про встречу знает.
+    /// Без явной дозагрузки встреча существует на сервере и в OWA, но в виджете не появляется.
+    func testCreatedEventIsFetchedIntoTheLocalMap() async throws {
+        var created = makeItem("20:new")
+        created.subject = "Планёрка"
+
+        let transport = ScriptedTransport([])
+        await transport.setFetchResult(created)
+        let store = EASInMemorySyncStore(
+            EASSyncSnapshot(
+                version: EASSyncSnapshot.currentVersion,
+                savedAt: Date(), collectionId: "20", syncKey: "7", filterType: 0, items: []
+            )
+        )
+        let session = session(transport, store: store)
+
+        try await session.createEvent(
+            subject: "Планёрка", agenda: "", location: "",
+            start: start, end: end,
+            requiredAttendees: [person("Анна", "anna@example.com")],
+            optionalAttendees: [], timeZone: moscow
+        )
+
+        let fetched = await transport.fetchedServerIds
+        XCTAssertEqual(fetched, ["20:new"], "созданная встреча должна быть запрошена явно")
+
+        let items = await session.currentItems().map(\.serverId)
+        XCTAssertEqual(items, ["20:new"], "и попасть в локальную карту, иначе виджет её не покажет")
+        XCTAssertEqual(store.load()?.items.count, 1, "и в снимок, чтобы пережить перезапуск")
+    }
+
+    /// Встреча создана в любом случае. Сбой дозагрузки не повод сообщать об ошибке —
+    /// она появится при следующей полной пересинхронизации.
+    func testFetchBackFailureDoesNotFailTheCreation() async throws {
+        let transport = ScriptedTransport([])
+        await transport.setFetchResult(nil)
+        let store = EASInMemorySyncStore(
+            EASSyncSnapshot(
+                version: EASSyncSnapshot.currentVersion,
+                savedAt: Date(), collectionId: "20", syncKey: "7", filterType: 0, items: []
+            )
+        )
+        let session = session(transport, store: store)
+
+        try await session.createEvent(
+            subject: "Планёрка", agenda: "", location: "",
+            start: start, end: end,
+            requiredAttendees: [], optionalAttendees: [], timeZone: moscow
+        )
+
+        let calls = await transport.createCalls
+        XCTAssertEqual(calls.count, 1, "создание состоялось")
     }
 }
