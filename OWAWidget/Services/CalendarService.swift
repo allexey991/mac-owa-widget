@@ -423,6 +423,11 @@ final class CalendarService: ObservableObject {
     func removeAccount(_ account: CalendarAccount) throws {
         try KeychainService.delete(accountID: account.id)
         revokeServerTrust(for: account)
+        // The ActiveSync session outlives provider rebuilds by design, so removing the account
+        // has to retire it explicitly — otherwise it would keep its credentials and its
+        // synchronisation chain alive for the rest of the process.
+        let accountID = account.id
+        Task { await EASSessionRegistry.shared.evict(accountID: accountID) }
         accounts.removeAll { $0.id == account.id }
         // No rollback here: the password and the pinned certificate are already gone, so putting
         // the account back would leave it unusable. Surface the failure instead — on the next
@@ -842,23 +847,31 @@ final class CalendarService: ObservableObject {
     func rebuildProviders() async {
         var built: [any CalendarProvider] = []
         for account in accounts {
-            switch account.accountType {
-            case .owa:
-                // Only credential-backed accounts need a Keychain entry, and a missing one is a
-                // real failure for them: the provider cannot authenticate without it.
-                guard let password = try? KeychainService.load(accountID: account.id) else {
+            // Only credential-backed accounts need a Keychain entry, and a missing one is a
+            // real failure for them: the provider cannot authenticate without it.
+            var password: String?
+            if account.accountType.requiresPassword {
+                guard let stored = try? KeychainService.load(accountID: account.id) else {
                     log.warning("No password in Keychain for account \(account.displayName) — skipping")
                     continue
                 }
-                if let provider = try? OWACalendarProvider(account: account, password: password) {
-                    built.append(provider)
-                } else {
-                    log.error("Failed to initialise OWACalendarProvider for \(account.displayName)")
-                }
-            case .googleCalendar:
-                built.append(GoogleCalendarProvider(account: account))
-            case .eventKit:
-                built.append(EventKitCalendarProvider(account: account, store: eventKitStore))
+                password = stored
+            }
+
+            do {
+                built.append(
+                    try CalendarProviderFactory.make(
+                        account: account,
+                        password: password,
+                        eventKitStore: eventKitStore
+                    )
+                )
+            } catch {
+                // No account name and no error text in the public half: this line is mirrored
+                // into the unified log, which macOS persists where the app has no say.
+                log.error(
+                    "Failed to initialise \(account.accountType.rawValue, privacy: .public) provider: \(error.localizedDescription)"
+                )
             }
         }
         providers = built

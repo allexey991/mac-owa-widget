@@ -143,7 +143,7 @@ watch: run
 
 ## Show recent diagnostic logs
 logs:
-	/usr/bin/log show --info --style compact --last 20m --predicate 'subsystem == "com.owawidget" && (category == "CalendarService" || category == "OWACalendarProvider" || category == "OWAClient")'
+	/usr/bin/log show --info --style compact --last 20m --predicate 'subsystem == "com.owawidget" && (category == "CalendarService" || category == "OWACalendarProvider" || category == "OWAClient" || category == "EASClient" || category == "EASCalendarProvider" || category == "EASAccountSession")'
 
 help:
 	@echo "make build   — compile Swift sources"
