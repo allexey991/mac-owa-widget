@@ -400,4 +400,4 @@
 "settings.account.eas.os" = "Operating system";
 "settings.account.eas.deviceId" = "Device ID";
 "settings.account.eas.deviceId.pending" = "generated on first connection";
-"settings.account.eas.advanced.help" = "These values identify the client to Exchange and appear in the administrator's device list. Change them only if the server admits a restricted set of device types.";
+"settings.account.eas.advanced.help" = "These values identify the client to Exchange and appear in Get-MobileDevice. Your organization can quarantine or block this device under its access rules. Change them only if the server requires a specific device profile.";

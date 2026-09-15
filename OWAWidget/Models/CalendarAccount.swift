@@ -23,11 +23,11 @@ enum AccountType: String, Codable, Sendable, CaseIterable {
     /// Whether the account authenticates with a password kept in the Keychain.
     ///
     /// `false` means `rebuildProviders()` must not require a Keychain entry: EventKit accounts
-    /// are authorised once by the system TCC prompt and hold no secret of their own.
+    /// are authorized once by the system TCC prompt, and direct Google Calendar will use OAuth.
     var requiresPassword: Bool {
         switch self {
-        case .owa, .eas, .googleCalendar: true
-        case .eventKit: false
+        case .owa, .eas: true
+        case .googleCalendar, .eventKit: false
         }
     }
 

@@ -130,7 +130,11 @@ struct WBXMLReader {
         var result = 0
         while i < bytes.count {
             let b = bytes[i]; i += 1
-            result = (result << 7) | Int(b & 0x7F)
+            let payload = Int(b & 0x7F)
+            // Multi-byte integers are used as lengths and offsets. Clamp malformed values to
+            // the input size before arithmetic can overflow or move the cursor backwards.
+            guard result <= (bytes.count - payload) / 128 else { return bytes.count }
+            result = result * 128 + payload
             if b & 0x80 == 0 { break }
         }
         return result
@@ -146,7 +150,7 @@ struct WBXMLReader {
         case 0x00:                       // SWITCH_PAGE
             i += 1
             page = Int(readByte())
-            return parseNode(depth: depth)
+            return parseNode(depth: depth + 1)
 
         case 0x01:                       // END
             i += 1
@@ -155,7 +159,7 @@ struct WBXMLReader {
         case 0x02:                       // ENTITY — unused by EAS
             i += 1
             _ = readMultiByte()
-            return parseNode(depth: depth)
+            return parseNode(depth: depth + 1)
 
         case 0x03:                       // STR_I
             i += 1

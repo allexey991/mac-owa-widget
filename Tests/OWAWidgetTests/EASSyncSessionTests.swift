@@ -450,11 +450,11 @@ final class EASSyncSessionTests: XCTestCase {
         XCTAssertEqual(requested, ["0", "1"])
     }
 
-    // MARK: Экономия записи снимка
+    // MARK: Snapshot write optimization
 
-    /// Проход по таймеру, не принёсший изменений, не должен перешифровывать весь календарь.
-    /// Пропуск записи безопасен: на диске остаётся согласованная пара «ключ + элементы»,
-    /// и после перезапуска сервер повторит ровно те изменения, которых не было.
+    /// A timer pass without changes must not re-encrypt the entire calendar.
+    /// Skipping the write is safe: disk keeps a consistent “key + items” pair, and after restart
+    /// the server repeats exactly the changes that were not present.
     func testUnchangedSyncDoesNotRewriteTheSnapshot() async throws {
         let store = EASInMemorySyncStore(
             EASSyncSnapshot(
@@ -501,8 +501,8 @@ final class EASSyncSessionTests: XCTestCase {
         XCTAssertEqual(saved.items.count, 2)
     }
 
-    /// Первый успешный проход обязан записаться даже без изменений: иначе `collectionId` и
-    /// рабочий ключ не переживут перезапуск, и всё начнётся с полной пересинхронизации.
+    /// The first successful pass must persist even without changes; otherwise `collectionId` and
+    /// the working key do not survive restart, forcing a full resynchronization.
     func testFirstSyncPersistsEvenWithoutChanges() async throws {
         let store = EASInMemorySyncStore()
         let transport = ScriptedTransport([

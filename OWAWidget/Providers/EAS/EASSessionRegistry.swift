@@ -46,9 +46,8 @@ actor EASSessionRegistry {
         return session
     }
 
-    /// Drops the session for an account that was removed. The stored snapshot is a separate
-    /// concern and is left alone — re-adding the same account should not pay for a full
-    /// resynchronisation.
+    /// Drops the in-memory session for an account that was removed. Its encrypted snapshot and
+    /// device identity are cleared by `CalendarService` as part of account removal.
     func evict(accountID: UUID) {
         entries.removeValue(forKey: accountID)
     }

@@ -1,12 +1,12 @@
 import XCTest
 @testable import OWAWidget
 
-/// Сведение занятости участников в состояние одной ячейки сетки.
+/// Aggregates attendee availability into one grid-cell state.
 ///
-/// Коды идут из merged free/busy Exchange: `0` свободен, `1` под вопросом, `2` занят,
-/// `3` вне офиса, `4` данных нет. Первые четыре — шкала тяжести, пятый к ней не относится,
-/// и именно это когда-то сломало отрисовку: `"4"` лексически больше `"3"`, поэтому один
-/// участник без опубликованной занятости перекрывал реально занятых.
+/// Codes come from Exchange merged free/busy: `0` free, `1` tentative, `2` busy,
+/// `3` out of office, and `4` no data. The first four form a severity scale; the fifth does not.
+/// This distinction once broke rendering: `"4"` is lexically greater than `"3"`, so one attendee
+/// without published availability could override genuinely busy attendees.
 final class SlotAvailabilityAggregationTests: XCTestCase {
 
     private func isFree(_ state: SlotAvailabilityState) -> Bool {
@@ -14,7 +14,7 @@ final class SlotAvailabilityAggregationTests: XCTestCase {
         return false
     }
 
-    // MARK: Обычная шкала
+    // MARK: Regular scale
 
     func testWorstStatusWins() {
         XCTAssertTrue(isFree(SlotAvailabilityState.aggregate(from: ["0", "0", "0"])))
@@ -34,10 +34,10 @@ final class SlotAvailabilityAggregationTests: XCTestCase {
         XCTAssertTrue(isFree(SlotAvailabilityState.aggregate(from: [])))
     }
 
-    // MARK: Код «нет данных»
+    // MARK: “No data” code
 
-    /// Тот самый баг: коллега без опубликованной занятости делал слот зелёным, хотя рядом
-    /// стоял реально занятый участник.
+    /// The original bug: a colleague without published availability made a slot green even when
+    /// another attendee was genuinely busy.
     func testNoDataDoesNotMaskABusyAttendee() {
         if case .busy = SlotAvailabilityState.aggregate(from: ["2", "4"]) {} else {
             XCTFail("«нет данных» не должно перекрывать занятость")
@@ -53,14 +53,13 @@ final class SlotAvailabilityAggregationTests: XCTestCase {
         }
     }
 
-    /// Когда занятость не опубликована ни у кого, известного статуса нет вовсе. Ячейка
-    /// показывается свободной, но кликабельной не станет: калькулятор требует ровно `"0"`
-    /// и такой слот не предложит.
+    /// When nobody has published availability, there is no known status. The cell appears free
+    /// but stays non-clickable: the calculator requires exactly `"0"` and will not offer it.
     func testAllUnknownFallsBackToFree() {
         XCTAssertTrue(isFree(SlotAvailabilityState.aggregate(from: ["4", "4", "4"])))
     }
 
-    /// Неизвестные коды из будущих версий протокола не должны вести себя как занятость.
+    /// Unknown codes from future protocol versions must not behave as busy.
     func testUnknownCodesAreTreatedAsFreeNotAsBusy() {
         XCTAssertTrue(isFree(SlotAvailabilityState.aggregate(from: ["0", "9"])))
     }

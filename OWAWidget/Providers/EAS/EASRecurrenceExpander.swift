@@ -62,21 +62,20 @@ enum EASRecurrenceExpander {
     /// synchronisation path.
     static let occurrenceCap = 2000
 
-    /// Дешёвая отбраковка перед раскрытием.
+    /// A cheap pre-expansion filter.
     ///
-    /// Календарь за годы накапливает тысячи прошедших встреч, а окно виджета — это
-    /// `[-7 дней, +30 дней]`. Раскрывать каждый элемент, чтобы затем выбросить почти все,
-    /// значит платить за всю историю на каждом проходе синхронизации.
+    /// A calendar accumulates thousands of past meetings over the years, while the widget window
+    /// is `[-7 days, +30 days]`. Expanding every item only to discard almost all of them means
+    /// paying for all history on every synchronization pass.
     ///
-    /// Проверка намеренно осторожная: сомнение трактуется в пользу раскрытия. Пропустить
-    /// встречу здесь — значит потерять её из календаря, а лишний раз раскрыть — потратить
-    /// микросекунды.
+    /// The check is deliberately conservative: uncertainty favours expansion. Skipping a meeting
+    /// here loses it from the calendar, while expanding once too often costs microseconds.
     static func mayProduceOccurrences(_ item: EASCalendarItem, in window: DateInterval) -> Bool {
         guard let start = item.start, let end = item.end else { return false }
         let duration = max(end.timeIntervalSince(start), 60)
 
-        // Перенесённый экземпляр может оказаться где угодно, в том числе за пределами правила,
-        // — и это как раз тот случай, когда встреча иначе исчезает бесследно.
+        // A moved occurrence can land anywhere, including outside the rule; that is precisely
+        // the case where the meeting would otherwise disappear without a trace.
         for exception in item.exceptions where !exception.isDeleted {
             let movedStart = exception.start ?? exception.originalStart
             let movedEnd = exception.end ?? movedStart.addingTimeInterval(duration)
@@ -87,11 +86,11 @@ enum EASRecurrenceExpander {
             return start < window.end && window.start < end
         }
 
-        // Серия не может начаться позже, чем окно закончилось.
+        // A series cannot begin after the window ends.
         if start >= window.end { return false }
 
-        // И не может дотянуться до окна, если закончилась раньше. `Until` ограничивает начало
-        // последнего экземпляра, поэтому к нему добавляется длительность.
+        // Nor can it reach the window if it ended earlier. `Until` limits the final occurrence's
+        // start, so its duration is added.
         if let until = recurrence.until,
            until.addingTimeInterval(duration) <= window.start {
             return false

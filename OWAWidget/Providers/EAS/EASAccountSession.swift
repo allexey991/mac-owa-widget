@@ -210,13 +210,12 @@ actor EASAccountSession {
                 if let created {
                     items[serverId] = created
                 } else {
-                    // Сервер элемент не вернул. Причин может быть несколько, и выяснять их
-                    // задним числом дорого, а последствие одно: встреча есть на сервере, но
-                    // в виджете её нет до полной пересинхронизации.
+                    // The server did not return the item. There may be several reasons, and
+                    // investigating them retrospectively is costly; the result is the same:
+                    // the meeting exists on the server but not in the widget until a full resync.
                     //
-                    // Мы знаем, что именно отправили, — значит можем собрать элемент сами.
-                    // Следующая синхронизация, которая его затронет, заменит эту версию на
-                    // серверную.
+                    // We know exactly what we sent, so we can build the item ourselves.
+                    // The next sync that touches it will replace this version with the server's.
                     items[serverId] = EASCalendarItem(
                         serverId: serverId,
                         locallyCreated: subject,
@@ -237,9 +236,8 @@ actor EASAccountSession {
         }
 
         persist()
-        // Открытым текстом: иначе единственное подтверждение, что встреча создана, остаётся
-        // в канале, который не читается. ServerId — идентификатор элемента на сервере, не
-        // содержимое встречи.
+        // Plaintext on purpose: otherwise the only evidence that the meeting was created stays
+        // in an unread log channel. ServerId identifies the server item, not meeting content.
         DiagnosticLog.event("EAS created event serverId=\(serverId ?? "none") attendees=\(requiredAttendees.count + optionalAttendees.count)")
     }
 
@@ -314,16 +312,14 @@ actor EASAccountSession {
                 }
             }
 
-            // Снимок перезаписывается только когда элементы действительно изменились.
+            // Rewrite the snapshot only when items actually changed.
             //
-            // Большинство проходов по таймеру не приносят ничего, а запись шифрует и кладёт
-            // на диск весь календарь целиком — на зрелом ящике это тысячи элементов каждые
-            // пять минут, впустую.
+            // Most timer passes bring no changes, while writing encrypts and persists the whole
+            // calendar — thousands of items every five minutes for a mature mailbox, for nothing.
             //
-            // Пропуск записи безопасен: на диске остаётся пара «ключ + элементы», снятая
-            // одновременно, то есть согласованная. После перезапуска синхронизация пойдёт от
-            // сохранённого ключа, и сервер повторит ровно те изменения, которых не было, —
-            // то есть ничего.
+            // Skipping the write is safe: disk retains an atomically captured, consistent
+            // “key + items” pair. After restart, sync resumes from that key and the server
+            // repeats exactly the changes that were absent — none.
             if changed || !persistedOnce {
                 persist()
                 persistedOnce = true
@@ -359,8 +355,8 @@ actor EASAccountSession {
         collectionId = snapshot.collectionId
         syncKey = snapshot.syncKey
         items = Dictionary(uniqueKeysWithValues: snapshot.items.map { ($0.serverId, $0) })
-        // Снимок восстановлен — значит согласованная пара «ключ + элементы» на диске уже есть,
-        // и проход без изменений переписывать её не обязан.
+        // The snapshot was restored, so disk already contains a consistent “key + items” pair;
+        // a pass without changes does not need to rewrite it.
         persistedOnce = true
         log.info("EAS snapshot restored with \(self.items.count, privacy: .public) items")
     }

@@ -491,10 +491,10 @@ final class EASRecurrenceTests: XCTestCase {
         XCTAssertTrue(first.allSatisfy { $0.changeKey == "20:1" }, "RSVP stays available")
     }
 
-    // MARK: Отбраковка перед раскрытием
+    // MARK: Pre-expansion filtering
 
-    /// Отсев существует ради скорости, но цена ошибки здесь — пропавшая встреча, поэтому
-    /// проверяется он строже, чем сама оптимизация того стоит.
+    /// The filter exists for performance, but an error here loses a meeting, so it is tested more
+    /// rigorously than the optimization itself might otherwise warrant.
     func testPastSingleIsRejectedCheaply() {
         let item = series(start: "20200101T070000Z", end: "20200101T080000Z", recurrence: nil)
         XCTAssertFalse(
@@ -509,7 +509,7 @@ final class EASRecurrenceTests: XCTestCase {
         )
     }
 
-    /// Встреча, начавшаяся до окна и идущая внутрь него, — тоже встреча.
+    /// A meeting that began before the window and continues into it is still a meeting.
     func testSingleStraddlingTheWindowStartSurvives() {
         let item = series(start: "20260831T220000Z", end: "20260901T020000Z", recurrence: nil)
         XCTAssertTrue(
@@ -537,7 +537,7 @@ final class EASRecurrenceTests: XCTestCase {
         )
     }
 
-    /// Бессрочная серия из прошлого достаёт до окна — её отсеивать нельзя.
+    /// An unbounded series from the past reaches the window and must not be filtered out.
     func testEndlessSeriesFromThePastSurvives() {
         let item = series(
             start: "20200101T070000Z", end: "20200101T080000Z", timezone: moscow,
@@ -548,8 +548,8 @@ final class EASRecurrenceTests: XCTestCase {
         )
     }
 
-    /// Самый опасный случай: серия давно закончилась, но один экземпляр перенесён в окно.
-    /// Отсев по правилу выбросил бы встречу, которая реально существует.
+    /// The most dangerous case: a series ended long ago, but one occurrence moved into the window.
+    /// Filtering by the rule would discard a meeting that actually exists.
     func testMovedOccurrenceRescuesAnOtherwiseRejectedSeries() {
         let item = series(
             start: "20200101T070000Z", end: "20200101T080000Z", timezone: moscow,
@@ -568,7 +568,7 @@ final class EASRecurrenceTests: XCTestCase {
         XCTAssertEqual(utcStamps(EASRecurrenceExpander.expand(item, in: w)), ["20260915T090000Z"])
     }
 
-    /// Удалённый экземпляр не повод оставлять давно законченную серию.
+    /// A deleted occurrence is not a reason to retain a long-finished series.
     func testDeletedExceptionDoesNotRescueASeries() {
         let item = series(
             start: "20200101T070000Z", end: "20200101T080000Z", timezone: moscow,

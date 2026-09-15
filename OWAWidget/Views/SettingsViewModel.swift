@@ -316,12 +316,14 @@ final class SettingsViewModel: ObservableObject {
     var canSaveAccount: Bool {
         guard let account = editingAccount else { return false }
         switch account.accountType {
-        case .owa, .eas, .googleCalendar:
+        case .owa, .eas:
             // The device profile needs no validation: empty fields fall back to defaults in
             // `EASDeviceProfile.normalized`, so a blank one cannot produce a malformed request.
             return !account.serverURL.isEmpty
                 && !account.email.isEmpty
                 && !(isAddingNew && editingPassword.isEmpty)
+        case .googleCalendar:
+            return !account.serverURL.isEmpty && !account.email.isEmpty
         case .eventKit:
             return eventKitAccess.canRead && !selectedCalendarIdentifiers.isEmpty
         }

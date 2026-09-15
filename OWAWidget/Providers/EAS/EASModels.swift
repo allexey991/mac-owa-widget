@@ -91,11 +91,11 @@ struct EASDeviceProfile: Codable, Sendable, Hashable {
     var osVersion: String
 
     static let `default` = EASDeviceProfile(
-        deviceType: "iPhone",
-        userAgent: "Apple-iPhone14C1/2101.331",
-        model: "MWLY2ZD/A",
-        friendlyName: "iPhone",
-        osVersion: "iOS 26.1 (23B85)"
+        deviceType: "OWAWidget",
+        userAgent: "OWAWidget/1.0",
+        model: "Mac",
+        friendlyName: "OWAWidget",
+        osVersion: "macOS"
     )
 
     init(
@@ -154,6 +154,12 @@ enum EASDeviceIdentity {
             legacyKey: nil,
             policy: .treatAsEmpty
         )
+    }
+
+    /// Deletes the device identity after its account is removed. Re-adding the account creates
+    /// a new Exchange device partnership instead of silently reusing retained account data.
+    static func clear(for accountID: UUID) {
+        makeStore(for: accountID).clear()
     }
 
     /// 32 uppercase hexadecimal characters — the longest identifier ActiveSync accepts.

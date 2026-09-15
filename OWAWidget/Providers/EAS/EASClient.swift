@@ -1,6 +1,34 @@
 import Foundation
 import os.log
 
+/// Stops redirects that would otherwise forward a manually attached Basic credential to an
+/// unconfigured host. Redirects within the configured host retain the original request.
+final class EASRedirectDelegate: NSObject, URLSessionTaskDelegate {
+    private let configuredHost: String
+
+    init(configuredHost: String) {
+        self.configuredHost = configuredHost.lowercased()
+    }
+
+    func permitsRedirection(to url: URL?) -> Bool {
+        url?.host?.lowercased() == configuredHost
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
+        guard permitsRedirection(to: request.url) else {
+            completionHandler(nil)
+            return
+        }
+        completionHandler(request)
+    }
+}
+
 /// Exchange ActiveSync transport.
 ///
 /// Speaks exactly one endpoint — `POST /Microsoft-Server-ActiveSync` — which is why this
@@ -46,14 +74,18 @@ actor EASClient {
         configuration.httpCookieAcceptPolicy = .never
         configuration.httpShouldSetCookies = false
 
-        // No delegate, and therefore no custom server-trust handling: the system trust store
+        // No custom server-trust handling: the system trust store
         // is the whole policy. The OWA client carries a trust-on-first-use escape hatch for
         // internal-CA certificates, but that is a deliberate relaxation of TLS validation, and
         // adding a second, never-exercised copy of it would be worse than not having one — a
         // path that looks handled and has never run. If a deployment ever presents a
         // certificate the system rejects, it surfaces here as a plain TLS error, which is both
         // honest and the right moment to add the prompt back.
-        self.session = URLSession(configuration: configuration)
+        self.session = URLSession(
+            configuration: configuration,
+            delegate: EASRedirectDelegate(configuredHost: config.host),
+            delegateQueue: nil
+        )
     }
 
     // MARK: Logging
@@ -129,9 +161,9 @@ actor EASClient {
             throw EASError.protocolError("no HTTP response for \(command)")
         }
         debug("→ \(command): HTTP \(http.statusCode), \(data.count) bytes")
-        // Открытым текстом, потому что это единственный лог, который пользователь может
-        // прочитать: `.info` в унифицированный лог macOS на диск не сохраняет. Ни команда,
-        // ни код ответа, ни размер персональных данных не несут.
+        // Plaintext because this is the only log the user can read: macOS does not persist
+        // unified-log `.info` entries to disk. Neither command, response code, nor byte size
+        // contains personal data.
         DiagnosticLog.event("EAS \(command) http=\(http.statusCode) bytes=\(data.count)")
 
         switch http.statusCode {
@@ -145,6 +177,8 @@ actor EASClient {
             throw EASError.authenticationRejected
 
         case 403:
+            credentialRejected = true
+            log.error("EAS \(command, privacy: .public) forbidden; client latched")
             throw EASError.forbidden("ActiveSync may be disabled for this mailbox.")
 
         case 449:
@@ -171,9 +205,9 @@ actor EASClient {
         // An unmapped token is a field arriving and being dropped, which is otherwise invisible.
         let unmapped = tree.unmappedTokens
         if !unmapped.isEmpty {
-            // Имя токена — идентификатор протокола вида `p10_0x16`, а не содержимое. Это и
-            // есть вся процедура проверки кодовой страницы: незамапленный токен означает
-            // поле, которое пришло и было выброшено, и больше об этом никто не сообщает.
+            // A token name is a protocol identifier such as `p10_0x16`, not content. This is
+            // the complete code-page validation procedure: an unmapped token means a field
+            // arrived and was discarded, and no other component reports that fact.
             let names = unmapped.sorted().joined(separator: ", ")
             log.notice("EAS \(command, privacy: .public) carried unmapped tokens: \(names, privacy: .public)")
             DiagnosticLog.event("EAS \(command) unmapped tokens: \(names)")
@@ -217,6 +251,7 @@ actor EASClient {
             credentialRejected = true
             throw EASError.authenticationRejected
         case 403:
+            credentialRejected = true
             throw EASError.forbidden("ActiveSync may be disabled for this mailbox.")
         default:
             throw EASError.http(http.statusCode, "OPTIONS failed")
@@ -486,8 +521,8 @@ actor EASClient {
 
         let fetched = collection.child(AS.responses)?.all(AS.fetch).first
         guard let fetched else {
-            // Сервер принял запрос, но элемент не вернул. Молчать об этом нельзя: снаружи это
-            // выглядит как «встреча пропала», и разобраться без этой строки невозможно.
+            // The server accepted the request but did not return the item. This must be logged:
+            // externally it looks like the meeting vanished, and diagnosis is impossible without it.
             DiagnosticLog.event("EAS fetch returned no item for \(serverId)")
             return (newKey, nil)
         }

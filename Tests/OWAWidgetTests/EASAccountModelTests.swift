@@ -115,6 +115,15 @@ final class EASAccountModelTests: XCTestCase {
         XCTAssertTrue(AccountType.eas.supportsMeetingCreation)
     }
 
+    func testGoogleCalendarDoesNotRequireAPasswordBeforeOAuthExists() {
+        XCTAssertFalse(AccountType.googleCalendar.requiresPassword)
+    }
+
+    func testDefaultDeviceProfileIdentifiesTheAppHonestly() {
+        XCTAssertEqual(EASDeviceProfile.default.deviceType, "OWAWidget")
+        XCTAssertEqual(EASDeviceProfile.default.model, "Mac")
+    }
+
     func testDeviceIdIsThirtyTwoHexCharacters() {
         let id = EASDeviceIdentity.generate()
         XCTAssertEqual(id.count, 32)

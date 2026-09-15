@@ -236,8 +236,8 @@ final class EASCreateMeetingTests: XCTestCase {
             requiredAttendees: [], optionalAttendees: [], timeZone: moscow
         )
 
-        // Ключ продвигается дважды: сам Add, затем дозагрузка созданного элемента —
-        // Fetch это тоже Sync. Потеря любого из них сломала бы следующую обычную синхронизацию.
+        // The key advances twice: first for Add, then to fetch the created item — Fetch is also
+        // Sync. Losing either update would break the next ordinary synchronization.
         XCTAssertEqual(store.load()?.syncKey, "7cf", "losing it would break the next ordinary sync")
     }
 
@@ -266,9 +266,9 @@ final class EASCreateMeetingTests: XCTestCase {
         }
     }
 
-    /// ActiveSync не присылает обратно элемент, созданный этим же устройством: `ServerId`
-    /// был отдан в ответе на `Add`, и сервер считает, что устройство про встречу знает.
-    /// Без явной дозагрузки встреча существует на сервере и в OWA, но в виджете не появляется.
+    /// ActiveSync does not send an item created by this device back: `ServerId` was returned by
+    /// `Add`, so the server considers the device to know about the meeting. Without an explicit
+    /// fetch, the meeting exists on the server and in OWA but does not appear in the widget.
     func testCreatedEventIsFetchedIntoTheLocalMap() async throws {
         var created = makeItem("20:new")
         created.subject = "Планёрка"
@@ -298,9 +298,9 @@ final class EASCreateMeetingTests: XCTestCase {
         XCTAssertEqual(store.load()?.items.count, 1, "и в снимок, чтобы пережить перезапуск")
     }
 
-    /// Сервер может выдать ServerId, но сам элемент по Fetch не отдать. Ждать следующей
-    /// полной пересинхронизации нельзя: снаружи это выглядит как «встреча не создалась»,
-    /// хотя она есть и в OWA, и у участников.
+    /// The server may issue a ServerId but not return the item through Fetch. Waiting for the
+    /// next full resync is not acceptable: externally it looks as if the meeting was not created,
+    /// even though it exists in OWA and for attendees.
     func testEventIsRebuiltLocallyWhenTheServerReturnsNoItem() async throws {
         let transport = ScriptedTransport([])
         await transport.setFetchResult(nil)          // Fetch вернул пусто
@@ -331,12 +331,13 @@ final class EASCreateMeetingTests: XCTestCase {
         XCTAssertEqual(created.attendees.map(\.type), [1, 2], "обязательный и необязательный")
         XCTAssertTrue(created.isOrganizer, "встречу организовали мы")
         XCTAssertFalse(created.isRecurring)
+        XCTAssertTrue(created.bodyTruncated, "opening details must fetch the server version")
 
-        // И должна пережить перезапуск, а не только показаться один раз.
+        // It must survive restart rather than merely appear once.
         XCTAssertEqual(store.load()?.items.count, 1)
     }
 
-    /// Личная запись без участников — не встреча, и приглашать некого.
+    /// A personal item without attendees is not a meeting and has nobody to invite.
     func testLocallyRebuiltEventWithoutAttendeesIsNotAMeeting() async throws {
         let transport = ScriptedTransport([])
         await transport.setFetchResult(nil)
@@ -360,7 +361,7 @@ final class EASCreateMeetingTests: XCTestCase {
         XCTAssertNil(created.location, "пустое поле не превращается в пустую строку")
     }
 
-    /// Серверная версия всегда важнее собранной локально.
+    /// The server version always takes precedence over the locally built one.
     func testServerVersionWinsWhenTheFetchSucceeds() async throws {
         var fromServer = makeItem("20:new")
         fromServer.subject = "Планёрка (как сохранил сервер)"
@@ -386,7 +387,7 @@ final class EASCreateMeetingTests: XCTestCase {
         XCTAssertEqual(created.subject, "Планёрка (как сохранил сервер)")
     }
 
-    /// Встреча создана в любом случае. Сбой дозагрузки не повод сообщать об ошибке.
+    /// The meeting is created either way. A fetch-back failure is not a reason to report an error.
     func testFetchBackFailureDoesNotFailTheCreation() async throws {
         let transport = ScriptedTransport([])
         await transport.setFetchResult(nil)

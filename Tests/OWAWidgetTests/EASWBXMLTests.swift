@@ -13,6 +13,13 @@ final class EASWBXMLTests: XCTestCase {
         data.map { String(format: "%02x", $0) }.joined()
     }
 
+    func testRedirectDelegateRejectsUnconfiguredHosts() {
+        let delegate = EASRedirectDelegate(configuredHost: "mail.example.com")
+        XCTAssertTrue(delegate.permitsRedirection(to: URL(string: "https://MAIL.example.com/next")))
+        XCTAssertFalse(delegate.permitsRedirection(to: URL(string: "https://evil.example.com/next")))
+        XCTAssertFalse(delegate.permitsRedirection(to: nil))
+    }
+
     // MARK: Encoding
 
     func testFolderSyncMatchesSpecificationBytes() {
@@ -199,6 +206,25 @@ final class EASWBXMLTests: XCTestCase {
     func testOpaqueLengthBeyondBufferIsClamped() throws {
         // OPAQUE (0xC3) claiming 200 bytes with only 3 present must not read out of bounds.
         let bytes: [UInt8] = [0x03, 0x01, 0x6A, 0x00, 0x00, 0x07, 0x56, 0xC3, 0xC8, 0x01, 0x61, 0x62]
+        XCTAssertNoThrow(try WBXMLReader.parse(Data(bytes)))
+    }
+
+    func testRepeatedPageSwitchesAreBoundedByMaximumDepth() {
+        let header: [UInt8] = [0x03, 0x01, 0x6A, 0x00]
+        let switches = Array(repeating: [UInt8(0x00), UInt8(0x07)], count: 128).flatMap { $0 }
+        XCTAssertNoThrow(try WBXMLReader.parse(Data(header + switches)))
+    }
+
+    func testRepeatedEntitiesAreBoundedByMaximumDepth() {
+        let header: [UInt8] = [0x03, 0x01, 0x6A, 0x00]
+        let entities = Array(repeating: [UInt8(0x02), UInt8(0x01)], count: 128).flatMap { $0 }
+        XCTAssertNoThrow(try WBXMLReader.parse(Data(header + entities)))
+    }
+
+    func testOversizedMultiByteValueCannotOverflowTheCursor() {
+        let bytes: [UInt8] = [0x03, 0x01, 0x6A, 0x00, 0xC3]
+            + Array(repeating: 0xFF, count: 32)
+            + [0x7F]
         XCTAssertNoThrow(try WBXMLReader.parse(Data(bytes)))
     }
 }

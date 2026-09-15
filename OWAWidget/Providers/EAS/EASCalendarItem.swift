@@ -254,12 +254,12 @@ extension EASCalendarItem {
 }
 
 extension EASCalendarItem {
-    /// Элемент, собранный из того, что клиент только что отправил на создание.
+    /// An item built from the data the client just sent to create it.
     ///
-    /// Нужен, когда сервер выдал `ServerId`, но сам элемент по `Fetch` не отдал. Версия
-    /// заведомо беднее серверной — нет нормализации, организатора и таймзоны, — но она
-    /// показывает встречу в календаре сразу, а первая же синхронизация, которая её затронет,
-    /// заменит эту версию настоящей.
+    /// Used when the server issued a `ServerId` but did not return the item through `Fetch`. This
+    /// version is deliberately less complete than the server's — it lacks normalization,
+    /// organizer, and time zone — but shows the meeting immediately. The first sync that touches
+    /// it replaces this version with the real one.
     init(
         serverId: String,
         locallyCreated subject: String,
@@ -286,13 +286,15 @@ extension EASCalendarItem {
             attendees: attendees,
             categories: [],
             uid: nil,
-            // 1 — встреча, которую организует этот пользователь; 0 — личная запись без
-            // участников. То же значение, что ушло в запрос на создание.
+            // 1 is a meeting organized by this user; 0 is a personal item without attendees.
+            // This is the same value sent in the create request.
             meetingStatus: attendees.isEmpty ? 0 : 1,
             responseType: nil,
             busyStatus: 2,
             bodyText: agenda.isEmpty ? nil : agenda,
-            bodyTruncated: false,
+            // This is only the optimistic local copy. Opening details must try to replace it
+            // with the server version, which carries normalization and organizer metadata.
+            bodyTruncated: true,
             onlineMeetingConfLink: nil,
             onlineMeetingExternalLink: nil,
             timezone: nil,

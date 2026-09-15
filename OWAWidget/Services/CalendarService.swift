@@ -234,7 +234,7 @@ final class CalendarService: ObservableObject {
         set { UserDefaults.standard.set(newValue, forKey: colleaguesCacheMinutesKey) }
     }
 
-    /// Rows the section shows before "Ещё N". Four keeps the section at ~150 pt of popover height.
+    /// Rows the section shows before “More N”. Four keeps the section at ~150 pt of popover height.
     var colleaguesRowLimit: Int {
         get {
             let stored = UserDefaults.standard.integer(forKey: colleaguesRowLimitKey)
@@ -428,6 +428,10 @@ final class CalendarService: ObservableObject {
         // synchronisation chain alive for the rest of the process.
         let accountID = account.id
         Task { await EASSessionRegistry.shared.evict(accountID: accountID) }
+        if account.accountType == .eas {
+            EASSyncStore.clear(accountID: accountID)
+            EASDeviceIdentity.clear(for: accountID)
+        }
         accounts.removeAll { $0.id == account.id }
         // No rollback here: the password and the pinned certificate are already gone, so putting
         // the account back would leave it unusable. Surface the failure instead — on the next
@@ -677,8 +681,8 @@ final class CalendarService: ObservableObject {
         guard let provider = providers.first(where: { $0.account.id == accountID }) else {
             throw OWAError.authenticationFailed("Account not found")
         }
-        // Не пытаемся создать встречу, если синк заблокирован: отвергнутые creds (риск
-        // lockout AD) ИЛИ недоверенный сертификат сервера.
+        // Do not create a meeting while sync is blocked: rejected credentials risk an AD lockout,
+        // and the server certificate may be untrusted.
         if syncStatus.blocksSync {
             throw OWAError.httpError(401, "Authentication or certificate trust required")
         }
@@ -876,8 +880,8 @@ final class CalendarService: ObservableObject {
         }
         providers = built
         updateEventStoreObservation()
-        // Тип аккаунта, а не имя: имя — персональные данные, тип отвечает на вопрос
-        // «через какой протокол всё это работало», который иначе выясняется гаданием.
+        // Account type, not name: a name is personal data, whereas type answers which protocol
+        // handled the account without requiring guesswork.
         let types = built.map { $0.account.accountType.rawValue }.sorted().joined(separator: ",")
         DiagnosticLog.event(
             "CalendarService providers rebuilt count=\(built.count) accounts=\(accounts.count) types=\(types)"

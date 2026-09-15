@@ -71,6 +71,11 @@ struct EASSyncStore: EASSyncStoring {
     func clear() {
         backing.clear()
     }
+
+    /// Deletes the persisted synchronization state for an account that was removed.
+    static func clear(accountID: UUID) {
+        EASSyncStore(accountID: accountID).clear()
+    }
 }
 
 /// In-memory double for tests.

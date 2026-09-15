@@ -162,7 +162,7 @@ actor EASCalendarProvider: CalendarProvider {
     ///
     /// Mirrors the OWA provider's fallback: a multi-word query that the server answers with
     /// nothing is retried on its longest token and filtered locally. Directories routinely fail
-    /// to match "Иван Петров" as a phrase while matching either half — without this, searching
+    /// to match "Ivan Petrov" as a phrase while matching either half — without this, searching
     /// by full name simply returns nothing.
     func findPeople(query: String) async throws -> [ResolvedAttendee] {
         do {
