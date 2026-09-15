@@ -129,6 +129,10 @@ actor EASClient {
             throw EASError.protocolError("no HTTP response for \(command)")
         }
         debug("→ \(command): HTTP \(http.statusCode), \(data.count) bytes")
+        // Открытым текстом, потому что это единственный лог, который пользователь может
+        // прочитать: `.info` в унифицированный лог macOS на диск не сохраняет. Ни команда,
+        // ни код ответа, ни размер персональных данных не несут.
+        DiagnosticLog.event("EAS \(command) http=\(http.statusCode) bytes=\(data.count)")
 
         switch http.statusCode {
         case 200:
@@ -167,9 +171,12 @@ actor EASClient {
         // An unmapped token is a field arriving and being dropped, which is otherwise invisible.
         let unmapped = tree.unmappedTokens
         if !unmapped.isEmpty {
-            log.notice(
-                "EAS \(command, privacy: .public) carried unmapped tokens: \(unmapped.sorted().joined(separator: ", "), privacy: .public)"
-            )
+            // Имя токена — идентификатор протокола вида `p10_0x16`, а не содержимое. Это и
+            // есть вся процедура проверки кодовой страницы: незамапленный токен означает
+            // поле, которое пришло и было выброшено, и больше об этом никто не сообщает.
+            let names = unmapped.sorted().joined(separator: ", ")
+            log.notice("EAS \(command, privacy: .public) carried unmapped tokens: \(names, privacy: .public)")
+            DiagnosticLog.event("EAS \(command) unmapped tokens: \(names)")
         }
 
         #if DEBUG

@@ -876,8 +876,11 @@ final class CalendarService: ObservableObject {
         }
         providers = built
         updateEventStoreObservation()
+        // Тип аккаунта, а не имя: имя — персональные данные, тип отвечает на вопрос
+        // «через какой протокол всё это работало», который иначе выясняется гаданием.
+        let types = built.map { $0.account.accountType.rawValue }.sorted().joined(separator: ",")
         DiagnosticLog.event(
-            "CalendarService providers rebuilt count=\(built.count) accounts=\(accounts.count)"
+            "CalendarService providers rebuilt count=\(built.count) accounts=\(accounts.count) types=\(types)"
         )
         // A provider rebuild means the user explicitly updated credentials or re-trusted
         // the server — lift any auth / certificate-trust block and reset the breaker.

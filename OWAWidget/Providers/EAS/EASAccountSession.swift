@@ -268,6 +268,7 @@ actor EASAccountSession {
             }
 
             persist()
+            DiagnosticLog.event("EAS sync done items=\(items.count) rounds=\(rounds)")
 
         } catch EASError.commandStatus(command: "Sync", status: "3") where allowingKeyReset {
             // The server no longer recognises the key. Anything it sends next would be a delta
