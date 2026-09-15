@@ -253,6 +253,55 @@ extension EASCalendarItem {
     }
 }
 
+extension EASCalendarItem {
+    /// Элемент, собранный из того, что клиент только что отправил на создание.
+    ///
+    /// Нужен, когда сервер выдал `ServerId`, но сам элемент по `Fetch` не отдал. Версия
+    /// заведомо беднее серверной — нет нормализации, организатора и таймзоны, — но она
+    /// показывает встречу в календаре сразу, а первая же синхронизация, которая её затронет,
+    /// заменит эту версию настоящей.
+    init(
+        serverId: String,
+        locallyCreated subject: String,
+        location: String,
+        start: Date,
+        end: Date,
+        agenda: String,
+        requiredAttendees: [ResolvedAttendee],
+        optionalAttendees: [ResolvedAttendee]
+    ) {
+        let attendees =
+            requiredAttendees.map { EASAttendee(name: $0.displayName, email: $0.email, type: 1, status: nil) }
+            + optionalAttendees.map { EASAttendee(name: $0.displayName, email: $0.email, type: 2, status: nil) }
+
+        self.init(
+            serverId: serverId,
+            subject: subject,
+            location: location.isEmpty ? nil : location,
+            start: start,
+            end: end,
+            isAllDay: false,
+            organizerName: nil,
+            organizerEmail: nil,
+            attendees: attendees,
+            categories: [],
+            uid: nil,
+            // 1 — встреча, которую организует этот пользователь; 0 — личная запись без
+            // участников. То же значение, что ушло в запрос на создание.
+            meetingStatus: attendees.isEmpty ? 0 : 1,
+            responseType: nil,
+            busyStatus: 2,
+            bodyText: agenda.isEmpty ? nil : agenda,
+            bodyTruncated: false,
+            onlineMeetingConfLink: nil,
+            onlineMeetingExternalLink: nil,
+            timezone: nil,
+            recurrence: nil,
+            exceptions: []
+        )
+    }
+}
+
 private extension String {
     var trimmedOrNil: String? {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)

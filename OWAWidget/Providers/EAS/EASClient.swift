@@ -485,7 +485,18 @@ actor EASClient {
         let newKey = collection.value(AS.syncKey) ?? syncKey
 
         let fetched = collection.child(AS.responses)?.all(AS.fetch).first
-        guard let fetched, let data = fetched.child(AS.applicationData) else {
+        guard let fetched else {
+            // Сервер принял запрос, но элемент не вернул. Молчать об этом нельзя: снаружи это
+            // выглядит как «встреча пропала», и разобраться без этой строки невозможно.
+            DiagnosticLog.event("EAS fetch returned no item for \(serverId)")
+            return (newKey, nil)
+        }
+        if let itemStatus = fetched.value(AS.status), itemStatus != "1" {
+            DiagnosticLog.event("EAS fetch \(serverId) status=\(itemStatus)")
+            return (newKey, nil)
+        }
+        guard let data = fetched.child(AS.applicationData) else {
+            DiagnosticLog.event("EAS fetch \(serverId) had no ApplicationData")
             return (newKey, nil)
         }
         return (newKey, EASCalendarItem(serverId: serverId, applicationData: data))

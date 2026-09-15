@@ -298,8 +298,95 @@ final class EASCreateMeetingTests: XCTestCase {
         XCTAssertEqual(store.load()?.items.count, 1, "и в снимок, чтобы пережить перезапуск")
     }
 
-    /// Встреча создана в любом случае. Сбой дозагрузки не повод сообщать об ошибке —
-    /// она появится при следующей полной пересинхронизации.
+    /// Сервер может выдать ServerId, но сам элемент по Fetch не отдать. Ждать следующей
+    /// полной пересинхронизации нельзя: снаружи это выглядит как «встреча не создалась»,
+    /// хотя она есть и в OWA, и у участников.
+    func testEventIsRebuiltLocallyWhenTheServerReturnsNoItem() async throws {
+        let transport = ScriptedTransport([])
+        await transport.setFetchResult(nil)          // Fetch вернул пусто
+        let store = EASInMemorySyncStore(
+            EASSyncSnapshot(
+                version: EASSyncSnapshot.currentVersion,
+                savedAt: Date(), collectionId: "20", syncKey: "7", filterType: 0, items: []
+            )
+        )
+        let session = session(transport, store: store)
+
+        try await session.createEvent(
+            subject: "Планёрка", agenda: "Повестка", location: "Переговорная 3",
+            start: start, end: end,
+            requiredAttendees: [person("Анна", "anna@example.com")],
+            optionalAttendees: [person("Борис", "boris@example.com")],
+            timeZone: moscow
+        )
+
+        let items = await session.currentItems()
+        let created = try XCTUnwrap(items.first)
+        XCTAssertEqual(created.serverId, "20:new")
+        XCTAssertEqual(created.subject, "Планёрка")
+        XCTAssertEqual(created.location, "Переговорная 3")
+        XCTAssertEqual(created.start, start)
+        XCTAssertEqual(created.end, end)
+        XCTAssertEqual(created.attendees.map(\.email), ["anna@example.com", "boris@example.com"])
+        XCTAssertEqual(created.attendees.map(\.type), [1, 2], "обязательный и необязательный")
+        XCTAssertTrue(created.isOrganizer, "встречу организовали мы")
+        XCTAssertFalse(created.isRecurring)
+
+        // И должна пережить перезапуск, а не только показаться один раз.
+        XCTAssertEqual(store.load()?.items.count, 1)
+    }
+
+    /// Личная запись без участников — не встреча, и приглашать некого.
+    func testLocallyRebuiltEventWithoutAttendeesIsNotAMeeting() async throws {
+        let transport = ScriptedTransport([])
+        await transport.setFetchResult(nil)
+        let store = EASInMemorySyncStore(
+            EASSyncSnapshot(
+                version: EASSyncSnapshot.currentVersion,
+                savedAt: Date(), collectionId: "20", syncKey: "7", filterType: 0, items: []
+            )
+        )
+        let session = session(transport, store: store)
+
+        try await session.createEvent(
+            subject: "Фокус-время", agenda: "", location: "",
+            start: start, end: end,
+            requiredAttendees: [], optionalAttendees: [], timeZone: moscow
+        )
+
+        let items = await session.currentItems()
+        let created = try XCTUnwrap(items.first)
+        XCTAssertFalse(created.isMeeting)
+        XCTAssertNil(created.location, "пустое поле не превращается в пустую строку")
+    }
+
+    /// Серверная версия всегда важнее собранной локально.
+    func testServerVersionWinsWhenTheFetchSucceeds() async throws {
+        var fromServer = makeItem("20:new")
+        fromServer.subject = "Планёрка (как сохранил сервер)"
+
+        let transport = ScriptedTransport([])
+        await transport.setFetchResult(fromServer)
+        let store = EASInMemorySyncStore(
+            EASSyncSnapshot(
+                version: EASSyncSnapshot.currentVersion,
+                savedAt: Date(), collectionId: "20", syncKey: "7", filterType: 0, items: []
+            )
+        )
+        let session = session(transport, store: store)
+
+        try await session.createEvent(
+            subject: "Планёрка", agenda: "", location: "",
+            start: start, end: end,
+            requiredAttendees: [], optionalAttendees: [], timeZone: moscow
+        )
+
+        let items = await session.currentItems()
+        let created = try XCTUnwrap(items.first)
+        XCTAssertEqual(created.subject, "Планёрка (как сохранил сервер)")
+    }
+
+    /// Встреча создана в любом случае. Сбой дозагрузки не повод сообщать об ошибке.
     func testFetchBackFailureDoesNotFailTheCreation() async throws {
         let transport = ScriptedTransport([])
         await transport.setFetchResult(nil)

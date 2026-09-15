@@ -207,7 +207,28 @@ actor EASAccountSession {
                     truncationSize: Self.bodyTruncationSize
                 )
                 syncKey = fetchedKey
-                if let created { items[serverId] = created }
+                if let created {
+                    items[serverId] = created
+                } else {
+                    // Сервер элемент не вернул. Причин может быть несколько, и выяснять их
+                    // задним числом дорого, а последствие одно: встреча есть на сервере, но
+                    // в виджете её нет до полной пересинхронизации.
+                    //
+                    // Мы знаем, что именно отправили, — значит можем собрать элемент сами.
+                    // Следующая синхронизация, которая его затронет, заменит эту версию на
+                    // серверную.
+                    items[serverId] = EASCalendarItem(
+                        serverId: serverId,
+                        locallyCreated: subject,
+                        location: location,
+                        start: start,
+                        end: end,
+                        agenda: agenda,
+                        requiredAttendees: requiredAttendees,
+                        optionalAttendees: optionalAttendees
+                    )
+                    DiagnosticLog.event("EAS created event rebuilt locally serverId=\(serverId)")
+                }
             } catch {
                 // The meeting is created either way; failing here would report an error for
                 // work that succeeded. It will appear on the next full resynchronisation.
