@@ -53,8 +53,21 @@ enum SlotAvailabilityState: Sendable {
     case busy
     case outOfOffice
 
+    /// Худший статус среди участников.
+    ///
+    /// `4` — «нет данных» (`[MS-OXWAVLS]`), а не уровень занятости, и убрать его нужно
+    /// **до** взятия максимума. Иначе он ломает всё остальное: лексически `"4" > "3" > "2"`,
+    /// поэтому один участник без опубликованной занятости перекрывал реально занятых и красил
+    /// слот в зелёное «Свободно». Exchange шлёт четвёрки штатно — для ящиков, чью занятость он
+    /// не отдаёт, — так что это случалось и до появления ActiveSync-провайдера.
+    ///
+    /// На выбор слотов это не влияло: `MeetingFreeSlotCalculator` требует ровно `"0"` и
+    /// неизвестных свободными не считает. Страдала только отрисовка сетки.
     static func aggregate(from chars: [Character]) -> SlotAvailabilityState {
-        guard let worst = chars.max() else { return .free(score: 0) }
+        let known = chars.filter { $0 != "4" }
+        // Пусто — занятость не опубликована ни у кого. Ячейка останется некликабельной:
+        // калькулятор такой слот не предложит.
+        guard let worst = known.max() else { return .free(score: 0) }
         switch worst {
         case "3": return .outOfOffice
         case "2": return .busy
