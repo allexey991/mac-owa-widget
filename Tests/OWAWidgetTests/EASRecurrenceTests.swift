@@ -490,4 +490,104 @@ final class EASRecurrenceTests: XCTestCase {
         XCTAssertEqual(Set(first.map(\.id)).count, first.count, "each occurrence is distinct")
         XCTAssertTrue(first.allSatisfy { $0.changeKey == "20:1" }, "RSVP stays available")
     }
+
+    // MARK: Отбраковка перед раскрытием
+
+    /// Отсев существует ради скорости, но цена ошибки здесь — пропавшая встреча, поэтому
+    /// проверяется он строже, чем сама оптимизация того стоит.
+    func testPastSingleIsRejectedCheaply() {
+        let item = series(start: "20200101T070000Z", end: "20200101T080000Z", recurrence: nil)
+        XCTAssertFalse(
+            EASRecurrenceExpander.mayProduceOccurrences(item, in: window("20260901T000000Z", "20261001T000000Z"))
+        )
+    }
+
+    func testSingleInsideTheWindowSurvives() {
+        let item = series(start: "20260915T070000Z", end: "20260915T080000Z", recurrence: nil)
+        XCTAssertTrue(
+            EASRecurrenceExpander.mayProduceOccurrences(item, in: window("20260901T000000Z", "20261001T000000Z"))
+        )
+    }
+
+    /// Встреча, начавшаяся до окна и идущая внутрь него, — тоже встреча.
+    func testSingleStraddlingTheWindowStartSurvives() {
+        let item = series(start: "20260831T220000Z", end: "20260901T020000Z", recurrence: nil)
+        XCTAssertTrue(
+            EASRecurrenceExpander.mayProduceOccurrences(item, in: window("20260901T000000Z", "20261001T000000Z"))
+        )
+    }
+
+    func testSeriesEndedBeforeTheWindowIsRejected() {
+        let item = series(
+            start: "20200101T070000Z", end: "20200101T080000Z", timezone: moscow,
+            recurrence: EASRecurrence(kind: .daily, interval: 1, until: EASDate.parse("20200601T000000Z"))
+        )
+        XCTAssertFalse(
+            EASRecurrenceExpander.mayProduceOccurrences(item, in: window("20260901T000000Z", "20261001T000000Z"))
+        )
+    }
+
+    func testSeriesStartingAfterTheWindowIsRejected() {
+        let item = series(
+            start: "20270101T070000Z", end: "20270101T080000Z", timezone: moscow,
+            recurrence: EASRecurrence(kind: .daily, interval: 1)
+        )
+        XCTAssertFalse(
+            EASRecurrenceExpander.mayProduceOccurrences(item, in: window("20260901T000000Z", "20261001T000000Z"))
+        )
+    }
+
+    /// Бессрочная серия из прошлого достаёт до окна — её отсеивать нельзя.
+    func testEndlessSeriesFromThePastSurvives() {
+        let item = series(
+            start: "20200101T070000Z", end: "20200101T080000Z", timezone: moscow,
+            recurrence: EASRecurrence(kind: .weekly, interval: 1, dayOfWeekMask: 4)
+        )
+        XCTAssertTrue(
+            EASRecurrenceExpander.mayProduceOccurrences(item, in: window("20260901T000000Z", "20261001T000000Z"))
+        )
+    }
+
+    /// Самый опасный случай: серия давно закончилась, но один экземпляр перенесён в окно.
+    /// Отсев по правилу выбросил бы встречу, которая реально существует.
+    func testMovedOccurrenceRescuesAnOtherwiseRejectedSeries() {
+        let item = series(
+            start: "20200101T070000Z", end: "20200101T080000Z", timezone: moscow,
+            recurrence: EASRecurrence(kind: .daily, interval: 1, until: EASDate.parse("20200601T000000Z")),
+            exceptions: [
+                EASException(
+                    originalStart: EASDate.parse("20200301T070000Z")!,
+                    isDeleted: false,
+                    start: EASDate.parse("20260915T090000Z"),
+                    end: EASDate.parse("20260915T100000Z")
+                )
+            ]
+        )
+        let w = window("20260901T000000Z", "20261001T000000Z")
+        XCTAssertTrue(EASRecurrenceExpander.mayProduceOccurrences(item, in: w))
+        XCTAssertEqual(utcStamps(EASRecurrenceExpander.expand(item, in: w)), ["20260915T090000Z"])
+    }
+
+    /// Удалённый экземпляр не повод оставлять давно законченную серию.
+    func testDeletedExceptionDoesNotRescueASeries() {
+        let item = series(
+            start: "20200101T070000Z", end: "20200101T080000Z", timezone: moscow,
+            recurrence: EASRecurrence(kind: .daily, interval: 1, until: EASDate.parse("20200601T000000Z")),
+            exceptions: [
+                EASException(originalStart: EASDate.parse("20260915T070000Z")!, isDeleted: true)
+            ]
+        )
+        XCTAssertFalse(
+            EASRecurrenceExpander.mayProduceOccurrences(item, in: window("20260901T000000Z", "20261001T000000Z"))
+        )
+    }
+
+    func testItemWithoutTimesIsRejected() {
+        let item = series(start: "20260915T070000Z", end: "20260915T080000Z", recurrence: nil)
+        var broken = item
+        broken.start = nil
+        XCTAssertFalse(
+            EASRecurrenceExpander.mayProduceOccurrences(broken, in: window("20260901T000000Z", "20261001T000000Z"))
+        )
+    }
 }

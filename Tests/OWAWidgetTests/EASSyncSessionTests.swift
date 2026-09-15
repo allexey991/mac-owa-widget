@@ -449,4 +449,72 @@ final class EASSyncSessionTests: XCTestCase {
         XCTAssertEqual(provisions, 1, "provisioned once, not twice")
         XCTAssertEqual(requested, ["0", "1"])
     }
+
+    // MARK: Экономия записи снимка
+
+    /// Проход по таймеру, не принёсший изменений, не должен перешифровывать весь календарь.
+    /// Пропуск записи безопасен: на диске остаётся согласованная пара «ключ + элементы»,
+    /// и после перезапуска сервер повторит ровно те изменения, которых не было.
+    func testUnchangedSyncDoesNotRewriteTheSnapshot() async throws {
+        let store = EASInMemorySyncStore(
+            EASSyncSnapshot(
+                version: EASSyncSnapshot.currentVersion,
+                savedAt: Date(timeIntervalSince1970: 1_000),
+                collectionId: "20",
+                syncKey: "5",
+                filterType: 0,
+                items: [makeItem("20:1")]
+            )
+        )
+        let transport = ScriptedTransport([
+            .result(EASSyncResult(syncKey: "6", moreAvailable: false, upserted: [], deletedIds: [])),
+        ])
+        let session = makeSession(transport: transport, store: store)
+
+        try await session.synchronize()
+
+        let saved = try XCTUnwrap(store.load())
+        XCTAssertEqual(saved.syncKey, "5", "ключ на диске остался прежним — вместе со своими элементами")
+        XCTAssertEqual(saved.savedAt, Date(timeIntervalSince1970: 1_000), "снимок не переписан")
+    }
+
+    func testChangedSyncDoesRewriteTheSnapshot() async throws {
+        let store = EASInMemorySyncStore(
+            EASSyncSnapshot(
+                version: EASSyncSnapshot.currentVersion,
+                savedAt: Date(timeIntervalSince1970: 1_000),
+                collectionId: "20",
+                syncKey: "5",
+                filterType: 0,
+                items: [makeItem("20:1")]
+            )
+        )
+        let transport = ScriptedTransport([
+            .result(EASSyncResult(syncKey: "6", moreAvailable: false, upserted: [makeItem("20:2")], deletedIds: [])),
+        ])
+        let session = makeSession(transport: transport, store: store)
+
+        try await session.synchronize()
+
+        let saved = try XCTUnwrap(store.load())
+        XCTAssertEqual(saved.syncKey, "6")
+        XCTAssertEqual(saved.items.count, 2)
+    }
+
+    /// Первый успешный проход обязан записаться даже без изменений: иначе `collectionId` и
+    /// рабочий ключ не переживут перезапуск, и всё начнётся с полной пересинхронизации.
+    func testFirstSyncPersistsEvenWithoutChanges() async throws {
+        let store = EASInMemorySyncStore()
+        let transport = ScriptedTransport([
+            .result(EASSyncResult(syncKey: "1", moreAvailable: false, upserted: [], deletedIds: [])),
+            .result(EASSyncResult(syncKey: "2", moreAvailable: false, upserted: [], deletedIds: [])),
+        ])
+        let session = makeSession(transport: transport, store: store)
+
+        try await session.synchronize()
+
+        let saved = try XCTUnwrap(store.load())
+        XCTAssertEqual(saved.syncKey, "2")
+        XCTAssertEqual(saved.collectionId, "20")
+    }
 }

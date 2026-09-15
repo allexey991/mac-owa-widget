@@ -34,6 +34,7 @@ actor EASAccountSession {
     private var syncKey = "0"
     private var items: [String: EASCalendarItem] = [:]
     private var restored = false
+    private var persistedOnce = false
     private var cachedSmtpAddress: String?
 
     /// Coalesces concurrent callers onto one network pass.
@@ -271,6 +272,7 @@ actor EASAccountSession {
             }
 
             var rounds = 0
+            var changed = false
             while rounds < Self.maxSyncRounds {
                 rounds += 1
                 let result = try await client.sync(
@@ -283,6 +285,7 @@ actor EASAccountSession {
                 syncKey = result.syncKey
                 for item in result.upserted { items[item.serverId] = item }
                 for id in result.deletedIds { items.removeValue(forKey: id) }
+                if !result.upserted.isEmpty || !result.deletedIds.isEmpty { changed = true }
 
                 if !result.moreAvailable { break }
                 if rounds == Self.maxSyncRounds {
@@ -290,8 +293,21 @@ actor EASAccountSession {
                 }
             }
 
-            persist()
-            DiagnosticLog.event("EAS sync done items=\(items.count) rounds=\(rounds)")
+            // Снимок перезаписывается только когда элементы действительно изменились.
+            //
+            // Большинство проходов по таймеру не приносят ничего, а запись шифрует и кладёт
+            // на диск весь календарь целиком — на зрелом ящике это тысячи элементов каждые
+            // пять минут, впустую.
+            //
+            // Пропуск записи безопасен: на диске остаётся пара «ключ + элементы», снятая
+            // одновременно, то есть согласованная. После перезапуска синхронизация пойдёт от
+            // сохранённого ключа, и сервер повторит ровно те изменения, которых не было, —
+            // то есть ничего.
+            if changed || !persistedOnce {
+                persist()
+                persistedOnce = true
+            }
+            DiagnosticLog.event("EAS sync done items=\(items.count) rounds=\(rounds) changed=\(changed)")
 
         } catch EASError.commandStatus(command: "Sync", status: "3") where allowingKeyReset {
             // The server no longer recognises the key. Anything it sends next would be a delta
@@ -322,6 +338,9 @@ actor EASAccountSession {
         collectionId = snapshot.collectionId
         syncKey = snapshot.syncKey
         items = Dictionary(uniqueKeysWithValues: snapshot.items.map { ($0.serverId, $0) })
+        // Снимок восстановлен — значит согласованная пара «ключ + элементы» на диске уже есть,
+        // и проход без изменений переписывать её не обязан.
+        persistedOnce = true
         log.info("EAS snapshot restored with \(self.items.count, privacy: .public) items")
     }
 

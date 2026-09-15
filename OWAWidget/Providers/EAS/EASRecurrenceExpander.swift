@@ -62,11 +62,50 @@ enum EASRecurrenceExpander {
     /// synchronisation path.
     static let occurrenceCap = 2000
 
+    /// Дешёвая отбраковка перед раскрытием.
+    ///
+    /// Календарь за годы накапливает тысячи прошедших встреч, а окно виджета — это
+    /// `[-7 дней, +30 дней]`. Раскрывать каждый элемент, чтобы затем выбросить почти все,
+    /// значит платить за всю историю на каждом проходе синхронизации.
+    ///
+    /// Проверка намеренно осторожная: сомнение трактуется в пользу раскрытия. Пропустить
+    /// встречу здесь — значит потерять её из календаря, а лишний раз раскрыть — потратить
+    /// микросекунды.
+    static func mayProduceOccurrences(_ item: EASCalendarItem, in window: DateInterval) -> Bool {
+        guard let start = item.start, let end = item.end else { return false }
+        let duration = max(end.timeIntervalSince(start), 60)
+
+        // Перенесённый экземпляр может оказаться где угодно, в том числе за пределами правила,
+        // — и это как раз тот случай, когда встреча иначе исчезает бесследно.
+        for exception in item.exceptions where !exception.isDeleted {
+            let movedStart = exception.start ?? exception.originalStart
+            let movedEnd = exception.end ?? movedStart.addingTimeInterval(duration)
+            if movedStart < window.end && window.start < movedEnd { return true }
+        }
+
+        guard let recurrence = item.recurrence else {
+            return start < window.end && window.start < end
+        }
+
+        // Серия не может начаться позже, чем окно закончилось.
+        if start >= window.end { return false }
+
+        // И не может дотянуться до окна, если закончилась раньше. `Until` ограничивает начало
+        // последнего экземпляра, поэтому к нему добавляется длительность.
+        if let until = recurrence.until,
+           until.addingTimeInterval(duration) <= window.start {
+            return false
+        }
+
+        return true
+    }
+
     static func expand(
         _ item: EASCalendarItem,
         in window: DateInterval,
         fallbackZone: TimeZone = .current
     ) -> [EASOccurrence] {
+        guard mayProduceOccurrences(item, in: window) else { return [] }
         guard let start = item.start, let end = item.end else { return [] }
         let duration = max(end.timeIntervalSince(start), 60)
 
