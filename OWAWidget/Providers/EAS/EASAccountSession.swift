@@ -44,7 +44,8 @@ actor EASAccountSession {
         accountID: UUID,
         client: any EASSyncing,
         store: any EASSyncStoring,
-        filterType: Int = 0
+        // 5 keeps the latest month while retaining all future and unbounded recurring events.
+        filterType: Int = 5
     ) {
         self.accountID = accountID
         self.client = client
