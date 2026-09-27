@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Renders docs/mockups/*.html into docs/images/*.png (@2x) with headless Chrome.
+# Renders docs/mockups/*.html into docs/images/*.png (@2x) with headless Chrome,
+# plus a .webp copy of every landing page screenshot (the README keeps the PNGs).
 # Usage: scripts/render_mockups.sh [page ...]   (default: all pages)
 set -euo pipefail
 
@@ -7,6 +8,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="$ROOT/docs/mockups"
 OUT="$ROOT/docs/images"
 CHROME="${CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
+command -v cwebp >/dev/null || { echo "cwebp not found: brew install webp" >&2; exit 1; }
 
 # page:width:height:langs[:theme]  (langs: "en ru" or "en"; theme: dark by default, "light" adds a -light suffix)
 PAGES=(
@@ -43,5 +45,10 @@ for entry in "${PAGES[@]}"; do
       --virtual-time-budget=2000 --screenshot="$target" \
       "file://$SRC/$page.html?lang=$lang${theme:+&theme=$theme}" >/dev/null 2>&1
     echo "rendered $target"
+    # hero is only used by the README and the social preview
+    if [[ "$page" != hero ]]; then
+      cwebp -quiet -q 88 -m 6 -sharp_yuv "$target" -o "${target%.png}.webp"
+      echo "rendered ${target%.png}.webp"
+    fi
   done
 done

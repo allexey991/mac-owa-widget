@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <url>
+    <loc>https://ilyabazhenov.github.io/mac-owa-widget/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://ilyabazhenov.github.io/mac-owa-widget/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://ilyabazhenov.github.io/mac-owa-widget/ru/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://ilyabazhenov.github.io/mac-owa-widget/"/>
+  </url>
+  <url>
+    <loc>https://ilyabazhenov.github.io/mac-owa-widget/ru/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://ilyabazhenov.github.io/mac-owa-widget/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://ilyabazhenov.github.io/mac-owa-widget/ru/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://ilyabazhenov.github.io/mac-owa-widget/"/>
+  </url>
+</urlset>

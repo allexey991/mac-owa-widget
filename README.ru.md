@@ -13,7 +13,7 @@
 
 **OWA Widget** живёт в строке меню macOS и держит под рукой весь рабочий день: встречи из Exchange / OWA, Google и iCloud на одном таймлайне, подключение к Teams, Zoom, Webex, Google Meet и KTalk одним нажатием, ответы на приглашения и поиск времени для новой встречи.
 
-**[Скачать для macOS](https://github.com/ilyabazhenov/mac-owa-widget/releases/latest)** · [Сайт](https://ilyabazhenov.github.io/mac-owa-widget/) · [Установка](#установка) · [Частые вопросы](#частые-вопросы)
+**[Скачать для macOS](https://github.com/ilyabazhenov/mac-owa-widget/releases/latest)** · [Сайт](https://ilyabazhenov.github.io/mac-owa-widget/ru/) · [Установка](#установка) · [Частые вопросы](#частые-вопросы)
 
 Бесплатно и с открытым кодом. При первом запуске нужна одна команда в Терминале — см. [Установка](#установка).
 

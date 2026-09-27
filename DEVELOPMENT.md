@@ -185,6 +185,12 @@ make mockups                              # render every page in EN and RU
 
 Rendering uses headless Google Chrome at 2x and writes `docs/images/<page>-<lang>.png` (dark app theme) and `docs/images/<page>-light-<lang>.png` (light app theme). The README and the landing page show the variant that matches the reader's theme. Preview a page in a browser with `docs/mockups/<page>.html?lang=ru`. After changing `hero`, copy `hero-light-en.png` to `github-social-preview.png` and upload it in the repository settings (Social preview). When the UI changes, update the matching mockup in the same change.
 
+## Landing Page
+
+The site in `docs/` is served by GitHub Pages. Each language has its own URL so search engines index both: `docs/index.html` is English (`/`, also `x-default`) and `docs/ru/index.html` is Russian (`/ru/`). Both pages share `docs/site.css` and `docs/site.js` and link to each other with `hreflang`. Keep the two pages in sync: the same sections, section ids and images, with only the text and `<head>` meta differing. The root page sends a first-time visitor with a Russian-language browser to `/ru/`; the RU/EN switch stores the choice in `localStorage` (`owa-lang`).
+
+Each page carries its own title, description, Open Graph tags and JSON-LD (`SoftwareApplication` and `FAQPage`). The `FAQPage` answers must match the visible FAQ text word for word, so update both when a question changes. The site uses the `.webp` screenshots that `make mockups` writes next to the PNGs (requires `cwebp`, `brew install webp`); the README keeps the PNGs. `docs/sitemap.xml` lists both pages; the mockup pages are `noindex`.
+
 ## Contributing
 
 Pull requests are welcome. For major changes, open an issue first to discuss the change.
