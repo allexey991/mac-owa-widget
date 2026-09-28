@@ -1,3 +1,49 @@
+## v1.0.52 - 2026-09-28
+
+### RU
+
+#### Что изменилось
+
+- Приложение может сообщать о новых приглашениях. После каждой синхронизации календарь Exchange сравнивается с прошлым состоянием, и новые приглашения, переносы и отмены встреч показываются в плавающей панели. Она остаётся на экране, пока вы её не закроете. Прямо из панели можно ответить на приглашение или открыть встречу. Об отмене сообщается, только если вы принимали встречу. Функция включается в настройках пунктом «Сообщать о новых приглашениях» и по умолчанию выключена.
+- Пока на приглашение нет ответа, оно учитывается в счётчике ✉︎ в строке меню и в новом разделе «Новые приглашения» в поповере. «Скрыть» убирает приглашение оттуда без ответа. Счётчик в строке меню можно отключить отдельно.
+- Повторы серий, которые каждый день попадают в окно синхронизации на 30 дней вперёд, не считаются новыми приглашениями. При первой синхронизации аккаунта текущее состояние календаря запоминается без уведомлений.
+- Название встречи можно скопировать. В шапке карточки встречи при наведении на название появляется кнопка копирования, а полное название видно во всплывающей подсказке. По правому клику на встрече (в карточке, строке списка, на таймлайне или в баннере) открывается меню: скопировать название, ссылку или название со временем и ссылкой.
+- Окна «Доступна новая версия» и прогресса установки обновления теперь показываются поверх остальных окон. Раньше они терялись за окнами других приложений, и обновление оставалось незавершённым.
+- Окно создания встречи полностью переведено. Статусы участников, подписи слотов, варианты длительности и экран успеха раньше были только на русском, а дни и месяцы выводились на языке системы. Теперь всё показывается на языке приложения.
+
+#### Установка
+
+1. Переместите `OWAWidget.app` в `/Applications`.
+2. Снимите quarantine-атрибуты (нужно только при первой установке):
+
+```bash
+xattr -dr com.apple.quarantine /Applications/OWAWidget.app
+```
+
+3. Все последующие обновления устанавливаются автоматически через кнопку «Установить» внутри приложения.
+
+### EN
+
+#### What's Changed
+
+- The app can now tell you about new invitations. After every sync the Exchange calendar is compared with its previous state, and new invitations, moved meetings and cancellations appear in a floating panel. The panel stays on screen until you close it. From the panel you can respond to an invitation or open the meeting. A cancellation is reported only for meetings you accepted. Turn it on with "Tell me about new invitations" in Preferences. It is off by default.
+- Until you respond, an invitation is counted by the ✉︎ badge in the menu bar and listed in the new "New invitations" section of the popover. "Hide" removes it from there without responding. The menu bar badge can be turned off separately.
+- Each day the 30-day sync window picks up another occurrence of every recurring series. These occurrences are not treated as new invitations. On an account's first sync the calendar is recorded without any notifications.
+- Meeting titles can be copied. Hover over the title in the meeting details header to reveal a copy button; the full title also shows in a tooltip. Right-click a meeting in the details header, list row, timeline or banner to copy its title, its link, or its title with time and link.
+- The "A new version is available" window and the install progress window now stay above all other windows. They used to get lost behind other apps' windows, so updates went unfinished.
+- The Create Meeting window is fully localized. Attendee statuses, slot labels, duration chips and the success screen used to appear only in Russian, and day and month names followed the system language. Everything now uses the app language.
+
+#### Installation
+
+1. Move `OWAWidget.app` to `/Applications`.
+2. Remove the quarantine attributes (only needed on the first install):
+
+```bash
+xattr -dr com.apple.quarantine /Applications/OWAWidget.app
+```
+
+3. All subsequent updates install automatically via the "Install" button inside the app.
+
 ## v1.0.51 - 2026-09-14
 
 ### RU
