@@ -149,6 +149,7 @@ final class CalendarService: ObservableObject {
     private let globalJoinHotkeyEnabledKey = "globalJoinHotkeyEnabled"
     private let invitationAlertsEnabledKey = "invitationAlertsEnabled"
     private let invitationMenuBarBadgeEnabledKey = "invitationMenuBarBadgeEnabled"
+    private let invitationPopoverSectionEnabledKey = "invitationPopoverSectionEnabled"
     private let colleaguesSectionEnabledKey = "colleaguesSectionEnabled"
     private let colleaguesRefreshOnPopoverOpenKey = "colleaguesRefreshOnPopoverOpen"
     private let colleaguesCacheMinutesKey = "colleaguesCacheMinutes"
@@ -291,8 +292,8 @@ final class CalendarService: ObservableObject {
     }
 
     /// When `true` (default), the menu bar label carries "✉︎N" for new invitations awaiting an
-    /// answer. The panel and the popover list do not depend on it: this only turns off the one
-    /// indicator that is always in sight.
+    /// answer. Takes effect only with the popover section on: the section is where the counted
+    /// invitations can be seen and hidden. The panel does not depend on either.
     var invitationMenuBarBadgeEnabled: Bool {
         get {
             if UserDefaults.standard.object(forKey: invitationMenuBarBadgeEnabledKey) == nil {
@@ -303,10 +304,24 @@ final class CalendarService: ObservableObject {
         set { UserDefaults.standard.set(newValue, forKey: invitationMenuBarBadgeEnabledKey) }
     }
 
-    /// Count for the menu bar label; zero while either setting is off.
+    /// Count for the menu bar label; zero while any of the settings is off.
     var menuBarInvitationCount: Int {
         guard invitationMenuBarBadgeEnabled else { return 0 }
-        return pendingInvitationGroups.count
+        return popoverInvitationGroups.count
+    }
+
+    /// When `true`, the popover lists new invitations awaiting an answer above the day timeline,
+    /// and the menu bar badge counts them. Off by default: the panel already reports each new
+    /// invitation, and without the list a badge left after closing the panel could not be cleared.
+    var invitationPopoverSectionEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: invitationPopoverSectionEnabledKey) }
+        set { UserDefaults.standard.set(newValue, forKey: invitationPopoverSectionEnabledKey) }
+    }
+
+    /// Invitations for the popover section; empty while either setting is off.
+    var popoverInvitationGroups: [MeetingInvitationGroup] {
+        guard invitationPopoverSectionEnabled else { return [] }
+        return pendingInvitationGroups
     }
 
     /// New invitations still awaiting an answer, series folded together. Empty while the feature

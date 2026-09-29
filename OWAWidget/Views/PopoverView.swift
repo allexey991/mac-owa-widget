@@ -301,10 +301,10 @@ struct PopoverView: View {
                     if updateCheck.availableUpdate != nil {
                         Divider()
                     }
-                    let pendingInvitations = service.pendingInvitationGroups
-                    if !pendingInvitations.isEmpty {
+                    let popoverInvitations = service.popoverInvitationGroups
+                    if !popoverInvitations.isEmpty {
                         PendingInvitationsSectionView(
-                            groups: pendingInvitations,
+                            groups: popoverInvitations,
                             horizontalPadding: contentHorizontalPadding,
                             onSelect: focus(on:),
                             onDismiss: { service.dismissInvitations(eventIDs: $0.events.map(\.id)) }

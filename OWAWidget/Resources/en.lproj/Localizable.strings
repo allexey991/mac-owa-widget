@@ -408,8 +408,9 @@
 
 /* Invitations */
 "preferences.invitations.menuBarBadge" = "Show the ✉︎ count in the menu bar";
+"preferences.invitations.popoverSection" = "Show “New invitations” in the popover";
 "preferences.invitations.enabled" = "Tell me about new invitations";
-"preferences.invitations.hint" = "New Exchange invitations, moved and cancelled meetings appear in a panel that stays on screen until you close it. A cancellation is reported only for meetings you accepted. Until you answer, an invitation is counted by the ✉︎ badge in the menu bar and listed under “New invitations” in the popover. “Hide” removes it from there without answering.";
+"preferences.invitations.hint" = "New Exchange invitations, moved and cancelled meetings appear in a panel that stays on screen until you close it. A cancellation is reported only for meetings you accepted. With “New invitations” turned on, the popover lists invitations you have not answered yet and the ✉︎ badge in the menu bar counts them. “Hide” removes an invitation from both without answering.";
 "invitations.panel.title.single" = "New invitation";
 "invitations.panel.title.multiple" = "New invitations · %d";
 "invitations.panel.title.updates" = "Calendar changes";

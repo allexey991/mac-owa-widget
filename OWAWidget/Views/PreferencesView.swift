@@ -166,11 +166,17 @@ struct PreferencesView: View {
                     isOn: $vm.invitationAlertsEnabled
                 )
                 Toggle(
-                    localization.tr("preferences.invitations.menuBarBadge"),
-                    isOn: $vm.invitationMenuBarBadgeEnabled
+                    localization.tr("preferences.invitations.popoverSection"),
+                    isOn: $vm.invitationPopoverSectionEnabled
                 )
                 .disabled(!vm.invitationAlertsEnabled)
                 .padding(.leading, 16)
+                Toggle(
+                    localization.tr("preferences.invitations.menuBarBadge"),
+                    isOn: $vm.invitationMenuBarBadgeEnabled
+                )
+                .disabled(!vm.invitationAlertsEnabled || !vm.invitationPopoverSectionEnabled)
+                .padding(.leading, 32)
                 Text(localization.tr("preferences.invitations.hint"))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)

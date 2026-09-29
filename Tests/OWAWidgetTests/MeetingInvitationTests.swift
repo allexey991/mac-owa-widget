@@ -603,17 +603,18 @@ final class CalendarServiceInvitationTests: XCTestCase {
 
     private let enabledKey = "invitationAlertsEnabled"
     private let badgeKey = "invitationMenuBarBadgeEnabled"
+    private let popoverSectionKey = "invitationPopoverSectionEnabled"
     private var savedFlags: [String: Any] = [:]
 
     override func setUp() {
         super.setUp()
-        for key in [enabledKey, badgeKey] {
+        for key in [enabledKey, badgeKey, popoverSectionKey] {
             savedFlags[key] = UserDefaults.standard.object(forKey: key)
         }
     }
 
     override func tearDown() {
-        for key in [enabledKey, badgeKey] {
+        for key in [enabledKey, badgeKey, popoverSectionKey] {
             if let value = savedFlags[key] {
                 UserDefaults.standard.set(value, forKey: key)
             } else {
@@ -669,6 +670,26 @@ final class CalendarServiceInvitationTests: XCTestCase {
     func testMenuBarBadgeCanBeTurnedOffWithoutLosingTheList() async {
         UserDefaults.standard.set(true, forKey: enabledKey)
         UserDefaults.standard.set(false, forKey: badgeKey)
+        UserDefaults.standard.set(true, forKey: popoverSectionKey)
+        let account = CalendarAccount(displayName: "Exchange", serverURL: "", email: "", accountType: .owa)
+        let provider = MutableProvider(account: account)
+        let presenter = RecordingPresenter()
+        let service = makeService(provider: provider, presenter: presenter)
+
+        await provider.set([])
+        await service.performSyncForTests()
+        await provider.set([invite("b", accountID: account.id)])
+        await service.performSyncForTests()
+
+        XCTAssertEqual(presenter.presented.count, 1)
+        XCTAssertEqual(service.popoverInvitationGroups.count, 1)
+        XCTAssertEqual(service.menuBarInvitationCount, 0)
+    }
+
+    func testPopoverSectionIsOffByDefaultAndTakesTheBadgeWithIt() async {
+        UserDefaults.standard.set(true, forKey: enabledKey)
+        UserDefaults.standard.set(true, forKey: badgeKey)
+        UserDefaults.standard.removeObject(forKey: popoverSectionKey)
         let account = CalendarAccount(displayName: "Exchange", serverURL: "", email: "", accountType: .owa)
         let provider = MutableProvider(account: account)
         let presenter = RecordingPresenter()
@@ -681,7 +702,12 @@ final class CalendarServiceInvitationTests: XCTestCase {
 
         XCTAssertEqual(presenter.presented.count, 1)
         XCTAssertEqual(service.pendingInvitationGroups.count, 1)
+        XCTAssertTrue(service.popoverInvitationGroups.isEmpty)
         XCTAssertEqual(service.menuBarInvitationCount, 0)
+
+        UserDefaults.standard.set(true, forKey: popoverSectionKey)
+        XCTAssertEqual(service.popoverInvitationGroups.count, 1)
+        XCTAssertEqual(service.menuBarInvitationCount, 1)
     }
 
     func testDisabledFeatureStaysSilentAndHidesBadge() async {
