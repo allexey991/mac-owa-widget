@@ -186,6 +186,40 @@ final class RespondToMeetingPayloadTests: XCTestCase {
         XCTAssertTrue(soap.contains("<t:AcceptItem>"))
     }
 
+    func testNilChangeKeyOmitsAttribute() {
+        let soap = OWARespondToMeetingPayload.soap(itemId: "AAMkAGI1+/9j=", changeKey: nil, action: .accept)
+        XCTAssertTrue(soap.contains(#"<t:ReferenceItemId Id="AAMkAGI1+/9j="/>"#))
+        XCTAssertFalse(soap.contains("ChangeKey"))
+    }
+
+    func testStaleChangeKeyCodes() {
+        XCTAssertTrue(OWARespondToMeetingPayload.isStaleChangeKeyCode("ErrorIrresolvableConflict"))
+        XCTAssertTrue(OWARespondToMeetingPayload.isStaleChangeKeyCode("ErrorStaleObject"))
+        XCTAssertFalse(OWARespondToMeetingPayload.isStaleChangeKeyCode("ErrorItemNotFound"))
+        XCTAssertFalse(OWARespondToMeetingPayload.isStaleChangeKeyCode("NoError"))
+    }
+
+    /// The field shape: the header and `MessageText` push `ResponseCode` far past the 600 bytes the
+    /// client used to inspect, so every Exchange-level failure passed for success.
+    func testResponseCodeFoundPastLongHeader() {
+        let body = """
+        <?xml version="1.0" encoding="utf-8"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">\
+        <s:Header><h:ServerVersionInfo MajorVersion="15" MinorVersion="1" MajorBuildNumber="2507" \
+        MinorBuildNumber="39" Version="V2017_07_11" xmlns:h="http://schemas.microsoft.com/exchange/services/2006/types" \
+        xmlns="http://schemas.microsoft.com/exchange/services/2006/types" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" \
+        xmlns:xsd="http://www.w3.org/2001/XMLSchema"/></s:Header><s:Body xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" \
+        xmlns:xsd="http://www.w3.org/2001/XMLSchema"><m:CreateItemResponse \
+        xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" \
+        xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types"><m:ResponseMessages>\
+        <m:CreateItemResponseMessage ResponseClass="Error"><m:MessageText>The change key passed in the request \
+        does not match the current change key for the item.</m:MessageText>\
+        <m:ResponseCode>ErrorIrresolvableConflict</m:ResponseCode><m:DescriptiveLinkKey>0</m:DescriptiveLinkKey>\
+        <m:Items/></m:CreateItemResponseMessage></m:ResponseMessages></m:CreateItemResponse></s:Body></s:Envelope>
+        """
+        XCTAssertGreaterThan(body.range(of: "<m:ResponseCode>")!.lowerBound.utf16Offset(in: body), 600)
+        XCTAssertEqual(OWAClient.extractEWSResponseCode(from: body), "ErrorIrresolvableConflict")
+    }
+
     func testElementNamePerAction() {
         XCTAssertEqual(OWARespondToMeetingPayload.elementName(for: .accept), "AcceptItem")
         XCTAssertEqual(OWARespondToMeetingPayload.elementName(for: .tentative), "TentativelyAcceptItem")

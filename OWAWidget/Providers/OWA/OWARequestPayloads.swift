@@ -582,15 +582,17 @@ enum OWARespondToMeetingPayload {
 
     /// - Parameters:
     ///   - itemId: EWS item identifier, straight out of the server's own JSON.
-    ///   - changeKey: EWS change key, same provenance.
+    ///   - changeKey: EWS change key, same provenance. `nil` answers whatever version the server
+    ///     holds now — the fallback when the one from the last sync went stale (see
+    ///     ``isStaleChangeKeyCode(_:)``).
     ///
     /// Both are escaped. They are server-authored, which makes them attacker-controlled the moment
     /// the server is, and an unescaped `"` in an attribute is all it takes to add elements to the
     /// envelope this client signs its session to.
-    static func soap(itemId: String, changeKey: String, action: MeetingResponseAction) -> String {
+    static func soap(itemId: String, changeKey: String?, action: MeetingResponseAction) -> String {
         let element = elementName(for: action)
         let escapedItemId = OWACreateCalendarEventPayload.escapeXML(itemId)
-        let escapedChangeKey = OWACreateCalendarEventPayload.escapeXML(changeKey)
+        let changeKeyAttribute = changeKey.map { #" ChangeKey="\#(OWACreateCalendarEventPayload.escapeXML($0))""# } ?? ""
 
         return """
         <?xml version="1.0" encoding="utf-8"?>
@@ -604,12 +606,20 @@ enum OWARespondToMeetingPayload {
             <m:CreateItem MessageDisposition="SendAndSaveCopy">
               <m:Items>
                 <t:\(element)>
-                  <t:ReferenceItemId Id="\(escapedItemId)" ChangeKey="\(escapedChangeKey)"/>
+                  <t:ReferenceItemId Id="\(escapedItemId)"\(changeKeyAttribute)/>
                 </t:\(element)>
               </m:Items>
             </m:CreateItem>
           </soap:Body>
         </soap:Envelope>
         """
+    }
+
+    /// Codes Exchange returns when the `ChangeKey` names a version of the item that is no longer
+    /// current. Typical right after the organiser moves a meeting: applying the update and then
+    /// processing the meeting request each bump the item's version, possibly after the sync that
+    /// raised the alert.
+    static func isStaleChangeKeyCode(_ code: String) -> Bool {
+        code == "ErrorIrresolvableConflict" || code == "ErrorStaleObject"
     }
 }

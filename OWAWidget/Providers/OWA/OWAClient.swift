@@ -1369,7 +1369,28 @@ actor OWAClient {
         let (data, response): (Data, URLResponse)
         do {
             (data, response) = try await sessionDataAllowingStaleReconnect(for: request)
+        } catch let urlErr as URLError where urlErr.code == .networkConnectionLost && attempt < 1 {
+            // The server drops a POST sent as the first request on a fresh, not yet NTLM-authenticated
+            // connection without any response (see `performEWSRespondRequest`). `authenticate()`
+            // authenticates a connection with a GET; the resend then rides it. The dropped request
+            // carried no credentials, so the server never created the meeting.
+            log.info("EWS CreateItem connection dropped before auth — re-authenticating")
+            DiagnosticLog.event("CreateItem URLError \(urlErr.code.rawValue), re-authenticating")
+            try await authenticate()
+            try await createCalendarEvent(
+                title: title,
+                agenda: agenda,
+                location: location,
+                start: start,
+                end: end,
+                requiredAttendees: requiredAttendees,
+                optionalAttendees: optionalAttendees,
+                folderIdentifier: folderIdentifier,
+                attempt: attempt + 1
+            )
+            return
         } catch let urlErr as URLError {
+            DiagnosticLog.event("CreateItem failed: URLError \(urlErr.code.rawValue)")
             log.error("EWS CreateItem URLError code=\(urlErr.code.rawValue, privacy: .public) (\(urlErr.localizedDescription, privacy: .public))")
             throw urlErr
         } catch {
@@ -1417,7 +1438,7 @@ actor OWAClient {
         guard (200..<300).contains(http.statusCode) else {
             throw OWAError.httpError(http.statusCode, body)
         }
-        let code = extractEWSResponseCode(from: body)
+        let code = Self.extractEWSResponseCode(from: body)
         log.info("EWS CreateItem responseCode=\(code ?? "nil", privacy: .public)")
         guard code == "NoError" else {
             throw OWAError.ewsError(code ?? "UnknownError")
@@ -1439,7 +1460,12 @@ actor OWAClient {
         return token
     }
 
-    private func performEWSRespondRequest(itemId: String, changeKey: String, action: MeetingResponseAction) async throws {
+    private func performEWSRespondRequest(
+        itemId: String,
+        changeKey: String?,
+        action: MeetingResponseAction,
+        attempt: Int = 0
+    ) async throws {
         let elementName = OWARespondToMeetingPayload.elementName(for: action)
         let soap = OWARespondToMeetingPayload.soap(itemId: itemId, changeKey: changeKey, action: action)
 
@@ -1459,25 +1485,83 @@ actor OWAClient {
             "EWS respondToMeeting itemId=\(String(itemId.prefix(40)), privacy: .private) action=\(elementName, privacy: .public)"
         )
 
-        let (data, response) = try await sessionDataAllowingStaleReconnect(for: request)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await sessionDataAllowingStaleReconnect(for: request)
+        } catch let urlErr as URLError where urlErr.code == .networkConnectionLost && attempt < 1 {
+            // Field trace: a POST that is the first request on a fresh, not yet NTLM-authenticated
+            // connection is dropped by the server with no response at all — no 401 challenge — so
+            // every reconnect-and-resend fails the same way. A GET on a fresh connection does get
+            // its 401 and completes NTLM, and a POST on that authenticated connection goes through.
+            // `authenticate()` is that GET. Nothing was answered: the server never saw credentials.
+            log.info("EWS respondToMeeting connection dropped before auth — re-authenticating")
+            DiagnosticLog.event("RSVP \(elementName) URLError \(urlErr.code.rawValue), re-authenticating")
+            try await authenticate()
+            try await performEWSRespondRequest(
+                itemId: itemId,
+                changeKey: changeKey,
+                action: action,
+                attempt: attempt + 1
+            )
+            return
+        } catch let urlErr as URLError {
+            DiagnosticLog.event("RSVP \(elementName) failed: URLError \(urlErr.code.rawValue)")
+            throw urlErr
+        }
         guard let http = response as? HTTPURLResponse else { throw OWAError.invalidResponse }
-        let responseBody = String(data: data.prefix(600), encoding: .utf8) ?? ""
         log.info(
             "EWS respondToMeeting status=\(http.statusCode, privacy: .public) bytes=\(data.count, privacy: .public)"
         )
-        log.debug("EWS respondToMeeting response preview=\(responseBody, privacy: .private)")
 
-        guard (200..<300).contains(http.statusCode) else {
-            throw OWAError.httpError(http.statusCode, responseBody)
+        // Same stale-session handling as every other EWS path: after the move to SSO the front-end
+        // answers a stale cookie with 449 (or 401/440), and URLSession only runs NTLM on a clean
+        // 401. Without the reauth the answer failed until a sync happened to refresh the session.
+        // The server rejected the request outright, so resending cannot answer the meeting twice.
+        if OWAError.isSessionStaleStatus(http.statusCode) {
+            guard attempt < 1 else {
+                DiagnosticLog.event("RSVP \(elementName) failed: HTTP \(http.statusCode) after reauth")
+                throw OWAError.httpError(http.statusCode, "EWS respondToMeeting auth retry exhausted")
+            }
+            log.info("EWS respondToMeeting HTTP \(http.statusCode, privacy: .public) — re-authenticating")
+            try await authenticate()
+            try await performEWSRespondRequest(
+                itemId: itemId,
+                changeKey: changeKey,
+                action: action,
+                attempt: attempt + 1
+            )
+            return
         }
 
-        // EWS returns HTTP 200 even for errors — check SOAP body
-        if let soapError = extractEWSResponseCode(from: responseBody), soapError != "NoError" {
-            throw OWAError.httpError(200, soapError)
+        let body = String(data: data, encoding: .utf8) ?? ""
+        log.debug("EWS respondToMeeting response preview=\(String(body.prefix(1000)), privacy: .private)")
+
+        guard (200..<300).contains(http.statusCode) else {
+            DiagnosticLog.event("RSVP \(elementName) failed: HTTP \(http.statusCode)")
+            throw OWAError.httpError(http.statusCode, String(body.prefix(600)))
+        }
+
+        // EWS returns HTTP 200 even for errors — check the SOAP body. The whole body: in an error
+        // response `MessageText` and the namespace-heavy header come first and push `ResponseCode`
+        // well past the first few hundred bytes.
+        let code = Self.extractEWSResponseCode(from: body)
+        log.info("EWS respondToMeeting responseCode=\(code ?? "nil", privacy: .public)")
+        if let code, code != "NoError" {
+            // The user answers the meeting they see, and after a sync that is the current version
+            // anyway: a version conflict is no reason to fail, answer the latest one instead.
+            if changeKey != nil, OWARespondToMeetingPayload.isStaleChangeKeyCode(code) {
+                log.info("EWS respondToMeeting \(code, privacy: .public) — retrying without ChangeKey")
+                DiagnosticLog.event("RSVP \(elementName) \(code), retrying without ChangeKey")
+                try await performEWSRespondRequest(itemId: itemId, changeKey: nil, action: action, attempt: attempt)
+                return
+            }
+            DiagnosticLog.event("RSVP \(elementName) failed: \(code)")
+            throw OWAError.ewsError(code)
         }
     }
 
-    private func extractEWSResponseCode(from body: String) -> String? {
+    static func extractEWSResponseCode(from body: String) -> String? {
         guard let re = try? NSRegularExpression(pattern: "<m:ResponseCode>([^<]+)</m:ResponseCode>") else { return nil }
         let ns = body as NSString
         guard let match = re.firstMatch(in: body, range: NSRange(location: 0, length: ns.length)),
