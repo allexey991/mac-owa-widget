@@ -1,3 +1,47 @@
+## v1.0.53 - 2026-09-29
+
+### RU
+
+#### Что изменилось
+
+- Исправлена «Ошибка отправки» при ответе на приглашение. Если приложение какое-то время не обращалось к серверу, первый ответ («Принять», «Под вопросом» или «Отклонить») не доходил до Exchange: срабатывало только повторное нажатие. Теперь приложение заново подключается к серверу и отправляет ответ с первого раза. То же исправлено при создании встречи.
+- Если Exchange отклонил ответ на приглашение, приложение больше не показывает его как отправленный.
+- Ответ на перенесённую встречу отправляется, даже если после последней синхронизации встреча успела ещё раз измениться на сервере.
+- Раздел «Новые приглашения» в поповере теперь можно отключить в настройках, по умолчанию он выключен. Счётчик ✉︎ в строке меню работает только вместе с этим разделом. Панель о новых приглашениях от этой настройки не зависит.
+- Причина сбоя ответа на приглашение или создания встречи записывается в диагностику («Скопировать диагностику») — без названий встреч и адресов.
+
+#### Установка
+
+1. Переместите `OWAWidget.app` в `/Applications`.
+2. Снимите quarantine-атрибуты (нужно только при первой установке):
+
+```bash
+xattr -dr com.apple.quarantine /Applications/OWAWidget.app
+```
+
+3. Все последующие обновления устанавливаются автоматически через кнопку «Установить» внутри приложения.
+
+### EN
+
+#### What's Changed
+
+- Fixed "Failed to send response" when answering an invitation. If the app had not talked to the server for a while, the first answer ("Accept", "Tentative" or "Decline") never reached Exchange, and only a second click worked. The app now reconnects to the server and sends the answer on the first try. Creating a meeting had the same problem and is fixed too.
+- When Exchange rejects an answer to an invitation, the app no longer shows it as sent.
+- An answer to a moved meeting now goes through even if the meeting changed on the server again after the last sync.
+- The "New invitations" section of the popover can now be turned off in Preferences. It is off by default. The ✉︎ badge in the menu bar works only together with this section. The new-invitations panel does not depend on this setting.
+- The reason an invitation answer or a new meeting failed is written to the diagnostics ("Copy diagnostics"), without meeting titles or addresses.
+
+#### Installation
+
+1. Move `OWAWidget.app` to `/Applications`.
+2. Remove the quarantine attributes (only needed on the first install):
+
+```bash
+xattr -dr com.apple.quarantine /Applications/OWAWidget.app
+```
+
+3. All subsequent updates install automatically via the "Install" button inside the app.
+
 ## v1.0.52 - 2026-09-28
 
 ### RU
