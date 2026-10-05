@@ -652,6 +652,7 @@ final class CreateMeetingViewModel: ObservableObject {
                 case .tentative:   kind = 2
                 case .outOfOffice: kind = 3
                 case .free:        kind = 4
+                case .noData:      kind = 5
                 }
                 if kind == currentKind {
                     currentKeys.append(tk)

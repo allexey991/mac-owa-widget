@@ -1601,8 +1601,11 @@ private struct AvailabilityCell: View {
         switch cell.state {
         case .free:
             return cell.fitsDuration ? localization.tr("create.meeting.grid.cell.free") : nil
+        case .noData:
+            return nil
         case .tentative, .busy, .outOfOffice:
-            let blocked = cell.attendeeStatuses.filter { $0.rawChar != "0" }
+            // Name only the attendees who block the slot; "no data" rows stay in the tooltip.
+            let blocked = cell.attendeeStatuses.filter { SlotAvailabilityState.isConflict($0.rawChar) }
             guard !blocked.isEmpty else { return nil }
             let first = blocked[0].isCurrentUser
                 ? localization.tr("create.meeting.attendee.you")
@@ -1625,14 +1628,18 @@ private struct AvailabilityCell: View {
         return .primary.opacity(0.65)
     }
 
+    /// Muted neutral fill for cells that cannot be offered as a slot but hold no conflict.
+    private var neutralFill: Color {
+        Color(nsColor: .tertiaryLabelColor).opacity(isHovered ? 0.22 : 0.14)
+    }
+
     private var bg: Color {
         guard let cell else { return .clear }
         // selected cells show through from overlay; no separate fill here
         // Свободно, но окно слишком короткое для выбранной длительности — нейтральный
         // приглушённый фон, чтобы отличать от полноценно доступных слотов.
         if freeButTooShort {
-            let base = Color(nsColor: .tertiaryLabelColor)
-            return base.opacity(isHovered ? 0.22 : 0.14)
+            return neutralFill
         }
         if colorScheme == .dark {
             // Насыщенные jewel-тона под тёмный фон
@@ -1649,6 +1656,8 @@ private struct AvailabilityCell: View {
             case .outOfOffice:
                 return Color(hue: 0.700, saturation: 0.65, brightness: 0.76)
                     .opacity(isHovered ? 0.92 : 0.80)
+            case .noData:
+                return neutralFill
             }
         } else {
             // Настоящие пастели под светлый фон
@@ -1665,6 +1674,8 @@ private struct AvailabilityCell: View {
             case .outOfOffice:
                 return Color(hue: 0.700, saturation: 0.28, brightness: 0.90)
                     .opacity(isHovered ? 1.00 : 0.90)
+            case .noData:
+                return neutralFill
             }
         }
     }

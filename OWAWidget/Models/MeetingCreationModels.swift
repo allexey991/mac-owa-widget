@@ -12,7 +12,7 @@ struct ResolvedAttendee: Identifiable, Hashable, Sendable, Codable {
 
 struct AttendeeAvailability: Sendable {
     let email: String
-    let mergedFreeBusy: String  // "002200..." 30-мин интервалы: 0=free, 1=tentative, 2=busy, 3=OOF
+    let mergedFreeBusy: String  // "002200..." 30-мин интервалы: 0=free, 1=tentative, 2=busy, 3=OOF, 4=no data
     let windowStart: Date
     let intervalMinutes: Int    // 30
 }
@@ -35,7 +35,7 @@ struct FreeSlot: Identifiable, Sendable {
 
 struct AttendeeSlotStatus: Sendable {
     let displayName: String
-    let rawChar: Character  // '0' free, '1' tentative, '2' busy, '3' OOF
+    let rawChar: Character  // '0' free, '1' tentative, '2' busy, '3' OOF, '4' no data
     /// Titles of all overlapping events. Multiple meetings can land in the same 30-min
     /// cell — keep them all so the tooltip can list every conflict, not just the first.
     let eventTitles: [String]
@@ -51,20 +51,29 @@ struct AttendeeSlotStatus: Sendable {
     }
 }
 
-enum SlotAvailabilityState: Sendable {
+enum SlotAvailabilityState: Sendable, Equatable {
     case free(score: Double)
     case tentative
     case busy
     case outOfOffice
+    /// Nobody has a conflict, but Exchange returned no free/busy for at least one attendee
+    /// (code `4`, or any code we do not recognise). Not `free`: `MeetingFreeSlotCalculator`
+    /// requires `0` from everyone, so it never offers such a cell as a slot either.
+    case noData
 
+    /// Codes that actually block a slot: 1 tentative, 2 busy, 3 OOF.
+    static func isConflict(_ code: Character) -> Bool {
+        code == "1" || code == "2" || code == "3"
+    }
+
+    /// Priority is spelled out instead of taking `chars.max()`: `4` ("no data") sorts above
+    /// `3`, so one attendee without data used to hide everyone else's conflicts as free.
     static func aggregate(from chars: [Character]) -> SlotAvailabilityState {
-        guard let worst = chars.max() else { return .free(score: 0) }
-        switch worst {
-        case "3": return .outOfOffice
-        case "2": return .busy
-        case "1": return .tentative
-        default:  return .free(score: 0)
-        }
+        if chars.contains("3") { return .outOfOffice }
+        if chars.contains("2") { return .busy }
+        if chars.contains("1") { return .tentative }
+        if chars.contains(where: { $0 != "0" }) { return .noData }
+        return .free(score: 0)
     }
 }
 

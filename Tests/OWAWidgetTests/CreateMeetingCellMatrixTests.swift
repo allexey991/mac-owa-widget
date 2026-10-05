@@ -185,6 +185,99 @@ final class CreateMeetingCellMatrixTests: XCTestCase {
         if case .outOfOffice = cell.state {} else { XCTFail("expected .outOfOffice for char '3'") }
     }
 
+    // MARK: - Aggregation: explicit ranking, "no data" (code 4)
+
+    private func aggregate(_ chars: String) -> SlotAvailabilityState {
+        SlotAvailabilityState.aggregate(from: Array(chars))
+    }
+
+    /// Regression: `chars.max()` picked "4" over "2", and the busy cell was painted free.
+    func testAggregateBusyWinsOverNoData() {
+        XCTAssertEqual(aggregate("24"), .busy)
+        XCTAssertEqual(aggregate("42"), .busy, "order of attendees must not matter")
+    }
+
+    func testAggregateOutOfOfficeWinsOverNoData() {
+        XCTAssertEqual(aggregate("34"), .outOfOffice)
+    }
+
+    func testAggregateTentativeWinsOverNoData() {
+        XCTAssertEqual(aggregate("14"), .tentative)
+    }
+
+    /// Nobody is busy, but one calendar is unknown: not free, because the slot calculator
+    /// never offers this cell either.
+    func testAggregateFreeWithNoDataIsNoData() {
+        XCTAssertEqual(aggregate("04"), .noData)
+        XCTAssertEqual(aggregate("44"), .noData)
+    }
+
+    func testAggregateEmptyIsFree() {
+        XCTAssertEqual(SlotAvailabilityState.aggregate(from: []), .free(score: 0))
+    }
+
+    func testAggregateAllZeroIsFree() {
+        XCTAssertEqual(aggregate("000"), .free(score: 0))
+    }
+
+    func testAggregateKeepsConflictPriority() {
+        XCTAssertEqual(aggregate("123"), .outOfOffice)
+        XCTAssertEqual(aggregate("12"), .busy)
+        XCTAssertEqual(aggregate("01"), .tentative)
+    }
+
+    /// Unknown codes rank like "no data": below every real conflict, never as free.
+    func testAggregateUnknownCodeIsNoDataAndNeverHidesConflict() {
+        XCTAssertEqual(aggregate("0x"), .noData)
+        XCTAssertEqual(aggregate("5"), .noData)
+        XCTAssertEqual(aggregate("92"), .busy, "'9' sorts above '2' but must not win")
+        XCTAssertEqual(aggregate("x1"), .tentative)
+        XCTAssertEqual(aggregate("93"), .outOfOffice)
+    }
+
+    func testBusyAttendeeIsNotHiddenByAttendeeWithoutData() {
+        let idx = slotIndex(dayOffset: 0, hour: 10)
+        let noData = String(repeating: "4", count: 5 * 48)
+        let vm = makeVM(attendeeAvailabilities: [
+            availability(email: "alice@x.com", chars: availabilityChars(overrides: [idx: "2"])),
+            availability(email: "bob@x.com", chars: noData),
+        ])
+        XCTAssertEqual(cell(in: vm.cellMatrix, dayOffset: 0, hour: 10)?.state, .busy)
+        XCTAssertEqual(cell(in: vm.cellMatrix, dayOffset: 0, hour: 11)?.state, .noData)
+    }
+
+    func testNoDataCellIsNotFreeAndHasNoFreeSlot() {
+        let idx = slotIndex(dayOffset: 0, hour: 10)
+        let vm = makeVM(attendeeAvailabilities: [
+            availability(email: "alice@x.com", chars: availabilityChars()),
+            availability(email: "bob@x.com", chars: availabilityChars(overrides: [idx: "4"])),
+        ])
+        let c = cell(in: vm.cellMatrix, dayOffset: 0, hour: 10)
+        XCTAssertEqual(c?.state, .noData)
+        XCTAssertNil(c?.freeSlot)
+        XCTAssertEqual(c?.attendeeStatuses.map(\.rawChar), ["0", "4"], "tooltip still lists both")
+    }
+
+    func testConsecutiveNoDataCellsMergeIntoBlock() {
+        let chars = availabilityChars(overrides: [
+            slotIndex(dayOffset: 0, hour: 10): "4",
+            slotIndex(dayOffset: 0, hour: 10, minute: 30): "4",
+        ])
+        let vm = makeVM(attendeeAvailabilities: [availability(email: "alice@x.com", chars: chars)])
+        XCTAssertEqual(cell(in: vm.cellMatrix, dayOffset: 0, hour: 10)?.slotPosition, .start)
+        XCTAssertEqual(cell(in: vm.cellMatrix, dayOffset: 0, hour: 10, minute: 30)?.slotPosition, .end)
+    }
+
+    /// A "no data" cell breaks a free run, so the free cell before it is too short for an hour.
+    func testNoDataCellBreaksFreeRunForFitsDuration() {
+        let chars = availabilityChars(overrides: [slotIndex(dayOffset: 0, hour: 9, minute: 30): "4"])
+        let vm = makeVM(attendeeAvailabilities: [availability(email: "alice@x.com", chars: chars)])
+        var draft = vm.draft
+        draft.durationMinutes = 60
+        vm.draft = draft
+        XCTAssertEqual(cell(in: vm.cellMatrix, dayOffset: 0, hour: 9)?.fitsDuration, false)
+    }
+
     // MARK: - Конфликт у организатора
 
     func testOrganizerEventSurfacesAsFirstAttendeeStatusWithTitle() {
