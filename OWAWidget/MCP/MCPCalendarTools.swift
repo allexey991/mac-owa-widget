@@ -79,6 +79,7 @@ final class MCPCalendarTools {
             case "find_events_with_person": return try await findEventsWithPerson(arguments, context)
             case "get_event_details": return try await getEventDetails(arguments, context)
             case "find_people": return try await findPeople(arguments, context)
+            case "find_free_slots": return try await findFreeSlots(arguments, context)
             case "create_meeting": return try await createMeeting(arguments, context, client: client)
             default: return .failure("Unknown tool: \(name)")
             }
@@ -197,26 +198,10 @@ final class MCPCalendarTools {
         let accountID = try optionalAccountID(arguments)
 
         var options = ScheduleStatsCalculator.Options()
-        if let text = arguments["work_start"]?.stringValue {
-            guard let minute = MCPDateCoder.minuteOfDay(text) else { throw ArgumentError("`work_start` must be HH:mm") }
-            options.workStartMinute = minute
-        }
-        if let text = arguments["work_end"]?.stringValue {
-            guard let minute = MCPDateCoder.minuteOfDay(text) else { throw ArgumentError("`work_end` must be HH:mm") }
-            options.workEndMinute = minute
-        }
-        guard options.workEndMinute > options.workStartMinute else {
-            throw ArgumentError("`work_end` must be later than `work_start`")
-        }
-        if let days = arguments["work_days"] {
-            guard let array = days.arrayValue else { throw ArgumentError("`work_days` must be an array like [\"mon\", \"tue\"]") }
-            options.workDays = try Set(array.map { value in
-                guard let name = value.stringValue?.lowercased(), let weekday = Self.weekdays[name] else {
-                    throw ArgumentError("Unknown day in `work_days`; use mon, tue, wed, thu, fri, sat, sun")
-                }
-                return weekday
-            })
-        }
+        let workHours = try parseWorkHours(arguments)
+        options.workStartMinute = workHours.startMinute
+        options.workEndMinute = workHours.endMinute
+        options.workDays = workHours.workDays
         options.minFocusMinutes = try optionalInt(arguments, "min_focus_minutes", range: 15...480) ?? 60
         options.countUnanswered = try optionalBool(arguments, "count_unanswered") ?? true
 
@@ -273,6 +258,121 @@ final class MCPCalendarTools {
             "count_unanswered": .bool(options.countUnanswered),
         ]
         return .success(result)
+    }
+
+    // MARK: - find_free_slots
+
+    static let maxPeoplePerSlotSearch = 20
+
+    private func findFreeSlots(_ arguments: [String: JSONValue], _ context: CallContext) async throws -> MCPToolResult {
+        let required = try emailList(arguments, "required")
+        guard !required.isEmpty else {
+            throw ArgumentError("`required` needs at least one email address (find them with find_people)")
+        }
+        let optional = try emailList(arguments, "optional").filter { !required.contains($0) }
+        guard required.count + optional.count <= Self.maxPeoplePerSlotSearch else {
+            throw ArgumentError("At most \(Self.maxPeoplePerSlotSearch) people per search")
+        }
+        guard let duration = try optionalInt(arguments, "duration_minutes", range: 15...480) else {
+            throw ArgumentError("`duration_minutes` is required, from 15 to 480")
+        }
+        let limit = try optionalInt(arguments, "limit", range: 1...50) ?? 10
+        let workHours = try parseWorkHours(arguments)
+        let account = try exchangeAccount(arguments)
+
+        // Default: from now to the end of the 7th day. The past has no free slots.
+        let calendar = context.coder.calendar
+        let todayStart = calendar.startOfDay(for: context.now)
+        let week = DateInterval(start: context.now, end: calendar.date(byAdding: .day, value: 7, to: todayStart) ?? context.now)
+        let resolved = try resolveRange(arguments, default: week, spanWhenOnlyFrom: .week, context)
+        let start = max(resolved.range.start, context.now)
+        guard resolved.range.end > start else { throw ArgumentError("The period is in the past") }
+        let range = DateInterval(start: start, end: resolved.range.end)
+
+        // Free/busy, plus the user's own address on the first search.
+        if let denial = accessGuard.permitRequest(count: 2) {
+            return .failure(denial.message)
+        }
+        let search: (slots: [FreeSlot], attendeeAvailability: [AttendeeAvailability], optionalAvailability: [AttendeeAvailability], organizerAvailability: AttendeeAvailability?, organizerEvents: [CalendarEvent])
+        do {
+            await accessGuard.acquireSlot()
+            defer { accessGuard.releaseSlot() }
+            search = try await calendarService.findFreeSlots(
+                requiredEmails: required,
+                optionalEmails: optional,
+                range: range,
+                durationMinutes: duration,
+                accountID: account.id,
+                workHours: workHours,
+                ignoreAttendeesWithoutData: true
+            )
+        } catch {
+            accessGuard.report(error, context: "mcp.findFreeSlots")
+            if let reason = MCPAccessGuard.blockReason(calendarService.syncStatus) {
+                return .failure(reason)
+            }
+            return .failure("Exchange did not return free/busy: \(error.localizedDescription)")
+        }
+
+        var rows: [String: AttendeeAvailability] = [:]
+        for row in search.attendeeAvailability + search.optionalAvailability {
+            rows[row.email.lowercased()] = row
+        }
+        let withoutData = (required + optional).filter { email in
+            rows[email].map(CalendarService.hasNoData) ?? true
+        }
+        let coder = context.coder
+
+        var result = commonFields(context)
+        result["range"] = rangeJSON(ResolvedRange(range: range, clipped: resolved.clipped), context)
+        result["duration_minutes"] = .int(Int64(duration))
+        result["slots"] = .array(search.slots.prefix(limit).map { slot in
+            let busy = optional.filter { email in
+                guard let row = rows[email], !CalendarService.hasNoData(row) else { return false }
+                return Self.isBusy(row, from: slot.start, to: slot.end)
+            }
+            return [
+                "start": .string(coder.string(slot.start)),
+                "end": .string(coder.string(slot.end)),
+                "optional_busy": .array(busy.map(JSONValue.string)),
+            ]
+        })
+        result["total"] = .int(Int64(search.slots.count))
+        result["truncated"] = .bool(search.slots.count > limit)
+        result["attendees"] = .array((required.map { ($0, true) } + optional.map { ($0, false) }).map { email, isRequired in
+            [
+                "email": .string(email),
+                "name": .optional(knownName(email)),
+                "required": .bool(isRequired),
+                "availability": .string(withoutData.contains(email) ? "no_data" : "ok"),
+            ]
+        })
+        result["options"] = [
+            "work_start": .string(Self.hhmm(workHours.startMinute)),
+            "work_end": .string(Self.hhmm(workHours.endMinute)),
+            "work_days": .array(Self.weekdayOrder.filter { workHours.workDays.contains(Self.weekdays[$0]!) }.map(JSONValue.string)),
+        ]
+        if !withoutData.isEmpty {
+            result["note"] = .string(
+                "Exchange has no calendar for \(withoutData.joined(separator: ", ")) (outside the organization or no access): the slots do not take them into account. Tell the user."
+            )
+        } else if search.slots.isEmpty {
+            result["note"] = "No time when everyone is free in this period and these working hours. Try a longer period, a shorter meeting or wider working hours."
+        }
+        return .success(result)
+    }
+
+    /// Any tentative, busy or out-of-office interval of `row` inside [start, end).
+    static func isBusy(_ row: AttendeeAvailability, from start: Date, to end: Date) -> Bool {
+        let chars = Array(row.mergedFreeBusy)
+        let interval = TimeInterval(row.intervalMinutes * 60)
+        var t = start
+        while t < end {
+            let index = Int(t.timeIntervalSince(row.windowStart) / interval)
+            if index >= 0, index < chars.count, "123".contains(chars[index]) { return true }
+            t = t.addingTimeInterval(interval)
+        }
+        return false
     }
 
     // MARK: - find_events_with_person
@@ -742,6 +842,32 @@ final class MCPCalendarTools {
             }
         }
         return nil
+    }
+
+    /// `work_start`, `work_end`, `work_days`, shared by get_schedule_stats and find_free_slots.
+    private func parseWorkHours(_ arguments: [String: JSONValue]) throws -> MeetingFreeSlotCalculator.WorkHours {
+        var hours = MeetingFreeSlotCalculator.WorkHours.standard
+        if let text = arguments["work_start"]?.stringValue {
+            guard let minute = MCPDateCoder.minuteOfDay(text) else { throw ArgumentError("`work_start` must be HH:mm") }
+            hours.startMinute = minute
+        }
+        if let text = arguments["work_end"]?.stringValue {
+            guard let minute = MCPDateCoder.minuteOfDay(text) else { throw ArgumentError("`work_end` must be HH:mm") }
+            hours.endMinute = minute
+        }
+        guard hours.endMinute > hours.startMinute else {
+            throw ArgumentError("`work_end` must be later than `work_start`")
+        }
+        if let days = arguments["work_days"] {
+            guard let array = days.arrayValue else { throw ArgumentError("`work_days` must be an array like [\"mon\", \"tue\"]") }
+            hours.workDays = try Set(array.map { value in
+                guard let name = value.stringValue?.lowercased(), let weekday = Self.weekdays[name] else {
+                    throw ArgumentError("Unknown day in `work_days`; use mon, tue, wed, thu, fri, sat, sun")
+                }
+                return weekday
+            })
+        }
+        return hours
     }
 
     private func requiredDateTime(_ arguments: [String: JSONValue], _ key: String, _ context: CallContext) throws -> Date {

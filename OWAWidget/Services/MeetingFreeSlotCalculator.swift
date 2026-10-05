@@ -6,6 +6,17 @@ enum MeetingFreeSlotCalculator {
     /// (~90 starts for 30-minute meetings) so later weekdays are not hidden after filling the cap Mon–Wed.
     static let maxReturnedFreeSlots = 96
 
+    /// When a slot may be proposed. The default is the window the create-meeting form always used.
+    struct WorkHours: Equatable, Sendable {
+        /// Minutes after midnight in `AppTimeZone`.
+        var startMinute = 9 * 60
+        var endMinute = 18 * 60
+        /// `Calendar` weekday numbers (1 = Sunday ... 7 = Saturday).
+        var workDays: Set<Int> = [2, 3, 4, 5, 6]
+
+        static let standard = WorkHours()
+    }
+
     static func compute(
         from availability: [AttendeeAvailability],
         optionalAvailability: [AttendeeAvailability] = [],
@@ -13,7 +24,8 @@ enum MeetingFreeSlotCalculator {
         organizerEvents: [CalendarEvent],
         range: DateInterval,
         durationMinutes: Int,
-        referenceNow: Date = .distantPast
+        referenceNow: Date = .distantPast,
+        workHours: WorkHours = .standard
     ) -> [FreeSlot] {
         _ = optionalAvailability  // v1: optional attendees do not affect slot selection; param reserved for v2 ranking
         guard range.end > range.start else { return [] }
@@ -65,10 +77,11 @@ enum MeetingFreeSlotCalculator {
             guard slotEnd > referenceNow else { i += 1; continue }
 
             let startMinuteOfDay = cal.component(.hour, from: slotStart) * 60 + cal.component(.minute, from: slotStart)
-            guard startMinuteOfDay >= 9 * 60, startMinuteOfDay + durationMinutes <= 18 * 60 else { i += 1; continue }
+            guard startMinuteOfDay >= workHours.startMinute,
+                  startMinuteOfDay + durationMinutes <= workHours.endMinute else { i += 1; continue }
 
             let weekday = cal.component(.weekday, from: slotStart)
-            guard weekday != 1, weekday != 7 else { i += 1; continue }
+            guard workHours.workDays.contains(weekday) else { i += 1; continue }
 
             let attendeesFree = availability.allSatisfy { avail in
                 let chars = Array(avail.mergedFreeBusy)
@@ -114,8 +127,10 @@ enum MeetingFreeSlotCalculator {
 
             let hourOfDay = Double(cal.component(.hour, from: slotStart))
                 + Double(cal.component(.minute, from: slotStart)) / 60.0
-            // Business hours window [9, 18]; earlier slot → higher score.
-            let score = max(0, min(1, (18.0 - hourOfDay) / 9.0))
+            // Earlier in the working day → higher score.
+            let workStartHour = Double(workHours.startMinute) / 60
+            let workEndHour = Double(workHours.endMinute) / 60
+            let score = max(0, min(1, (workEndHour - hourOfDay) / max(1, workEndHour - workStartHour)))
             results.append(FreeSlot(start: slotStart, end: slotEnd, score: score))
             if results.count >= maxReturnedFreeSlots { break }
             i += slotsNeeded

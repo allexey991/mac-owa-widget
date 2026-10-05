@@ -720,14 +720,16 @@ final class CalendarService: ObservableObject {
         range: DateInterval,
         displayRange: DateInterval? = nil,
         durationMinutes: Int,
-        accountID: UUID
+        accountID: UUID,
+        workHours: MeetingFreeSlotCalculator.WorkHours = .standard,
+        ignoreAttendeesWithoutData: Bool = false
     ) async throws -> (slots: [FreeSlot], attendeeAvailability: [AttendeeAvailability], optionalAvailability: [AttendeeAvailability], organizerAvailability: AttendeeAvailability?, organizerEvents: [CalendarEvent]) {
         guard let provider = providers.first(where: { $0.account.id == accountID }) else { return ([], [], [], nil, []) }
 
         let cal = AppTimeZone.calendar
         let (requestStart, requestEnd) = UserAvailabilityRequestWindow.bounds(
             for: displayRange ?? range,
-            referenceNow: Date(),
+            referenceNow: clock(),
             calendar: cal
         )
 
@@ -776,16 +778,27 @@ final class CalendarService: ObservableObject {
                 && !ev.isCancelled
                 && ev.responseType != .declined
         }
+        // A required attendee Exchange has nothing on (all "4": outside the organization, no
+        // permission) would otherwise block every slot. The MCP tool reports them separately.
+        let slotAvailability = ignoreAttendeesWithoutData
+            ? attendeeAvailability.filter { !Self.hasNoData($0) }
+            : attendeeAvailability
         let slots = MeetingFreeSlotCalculator.compute(
-            from: attendeeAvailability,
+            from: slotAvailability,
             optionalAvailability: optionalAvailability,
             organizerAvailability: organizerAvailability,
             organizerEvents: organizerEvents,
             range: range,
             durationMinutes: durationMinutes,
-            referenceNow: Date()
+            referenceNow: clock(),
+            workHours: workHours
         )
         return (slots: slots, attendeeAvailability: attendeeAvailability, optionalAvailability: optionalAvailability, organizerAvailability: organizerAvailability, organizerEvents: organizerEvents)
+    }
+
+    /// Exchange has no free/busy for this mailbox: every interval is "4".
+    static func hasNoData(_ availability: AttendeeAvailability) -> Bool {
+        availability.mergedFreeBusy.allSatisfy { $0 == "4" }
     }
 
     func createMeeting(

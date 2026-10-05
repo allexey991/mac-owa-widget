@@ -1263,48 +1263,25 @@ actor OWAClient {
     }
 
     private func parseAvailabilityResponse(_ data: Data, emails: [String], windowStart: Date) -> [AttendeeAvailability] {
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [] }
-        var mergedStrings: [String] = []
-        collectMergedFreeBusy(from: json, into: &mergedStrings)
+        guard let json = try? JSONSerialization.jsonObject(with: data) else { return [] }
+        let rows = OWAAvailabilityResponseParser.parse(json, emails: emails, windowStart: windowStart)
 
         #if DEBUG
         let fmt = DateFormatter()
         fmt.dateFormat = "HH:mm"
-        for (email, merged) in zip(emails, mergedStrings) {
-            // Decode: index i → windowStart + i*30min, char: 0=free 1=tentative 2=busy 3=OOF
-            let slots = merged.enumerated().map { (i, ch) -> String in
+        dlog("availability: \(rows.count) of \(emails.count) mailboxes have data")
+        for row in rows {
+            // Decode: index i → windowStart + i*30min, char: 0=free 1=tentative 2=busy 3=OOF 4=no data
+            let slots = row.mergedFreeBusy.enumerated().map { (i, ch) -> String in
                 let t = windowStart.addingTimeInterval(Double(i) * 1800)
                 return "\(fmt.string(from: t))=\(ch)"
             }
-            dlog("availability[\(email)]: \(merged)")
+            dlog("availability[\(row.email)]: \(row.mergedFreeBusy)")
             dlog("  decoded slots: \(slots.joined(separator: " "))")
         }
         #endif
 
-        return zip(emails, mergedStrings).map { email, merged in
-            AttendeeAvailability(
-                email: email,
-                mergedFreeBusy: merged,
-                windowStart: windowStart,
-                intervalMinutes: 30
-            )
-        }
-    }
-
-    private func collectMergedFreeBusy(from value: Any, into results: inout [String]) {
-        if let dict = value as? [String: Any] {
-            if let merged = dict["MergedFreeBusy"] as? String, !merged.isEmpty {
-                results.append(merged)
-                return
-            }
-            for val in dict.values {
-                collectMergedFreeBusy(from: val, into: &results)
-            }
-        } else if let arr = value as? [Any] {
-            for item in arr {
-                collectMergedFreeBusy(from: item, into: &results)
-            }
-        }
+        return rows
     }
 
     // MARK: - CreateCalendarEvent (EWS SOAP)

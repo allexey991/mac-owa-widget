@@ -12,6 +12,9 @@ final class MCPCalendarToolsTests: XCTestCase {
         private let people: [ResolvedAttendee]
         private let ownEmail: String?
         private let ownEmailError: Error?
+        /// Free/busy character per 30-minute interval start; a mailbox missing here gets no row,
+        /// as when Exchange has nothing for it.
+        private let busy: [String: @Sendable (Date) -> Character]
         private(set) var detailCalls: [String] = []
         private(set) var ownEmailCalls = 0
         private(set) var created: [(title: String, start: Date, required: [String], optional: [String])] = []
@@ -22,7 +25,8 @@ final class MCPCalendarToolsTests: XCTestCase {
             error: Error? = nil,
             people: [ResolvedAttendee] = [],
             ownEmail: String? = nil,
-            ownEmailError: Error? = nil
+            ownEmailError: Error? = nil,
+            busy: [String: @Sendable (Date) -> Character] = [:]
         ) {
             self.account = account
             self.attendeesByID = attendeesByID
@@ -30,6 +34,16 @@ final class MCPCalendarToolsTests: XCTestCase {
             self.people = people
             self.ownEmail = ownEmail
             self.ownEmailError = ownEmailError
+            self.busy = busy
+        }
+
+        func getUserAvailability(emails: [String], from start: Date, to end: Date) async throws -> [AttendeeAvailability] {
+            emails.compactMap { email in
+                guard let state = busy[email] else { return nil }
+                let count = Int(end.timeIntervalSince(start) / 1800)
+                let merged = String((0..<count).map { state(start.addingTimeInterval(Double($0) * 1800)) })
+                return AttendeeAvailability(email: email, mergedFreeBusy: merged, windowStart: start, intervalMinutes: 30)
+            }
         }
 
         func findPeople(query: String) async throws -> [ResolvedAttendee] {
@@ -452,6 +466,54 @@ final class MCPCalendarToolsTests: XCTestCase {
         XCTAssertTrue(short.isError)
         let local = await tools.call(name: "find_people", arguments: ["query": "Ivanov", "account_id": .string(local.id.uuidString)])
         XCTAssertTrue(local.isError)
+    }
+
+    // MARK: - find_free_slots
+
+    /// Whole day, every day: keeps the test independent of the display time zone the slot grid
+    /// uses for working hours.
+    private var allDay: [String: JSONValue] {
+        ["work_start": "00:00", "work_end": "24:00", "work_days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]]
+    }
+
+    func testFreeSlotsAvoidEveryonesBusyTimeAndReportPeopleWithoutData() async {
+        let busyFrom = date(6, 10), busyTo = date(6, 12), optionalBusy = date(6, 13)
+        let provider = DetailsProvider(account: exchange, people: [ivanov], ownEmail: "me@corp.ru", busy: [
+            "me@corp.ru": { _ in "0" },
+            "ivanov@corp.ru": { $0 >= busyFrom && $0 < busyTo ? "2" : "0" },
+            "ivanov@partner.com": { _ in "4" },
+            "petrov@corp.ru": { $0 == optionalBusy ? "1" : "0" },
+        ])
+        // The user's own meeting at 12:00 blocks that hour too.
+        let (tools, _) = makeTools(events: [event("own", day: 6, hour: 12)], provider: provider)
+        _ = await tools.call(name: "find_people", arguments: ["query": "Иванов"])
+
+        var arguments = allDay
+        arguments["required"] = ["ivanov@corp.ru", "ivanov@partner.com", "nobody@corp.ru"]
+        arguments["optional"] = ["petrov@corp.ru"]
+        arguments["duration_minutes"] = 60
+        arguments["from"] = "2026-10-06T09:00"
+        arguments["to"] = "2026-10-06T14:00"
+        let result = await tools.call(name: "find_free_slots", arguments: arguments)
+
+        XCTAssertFalse(result.isError, result.errorMessage ?? "")
+        let slots = result.structured?["slots"]?.arrayValue ?? []
+        XCTAssertEqual(slots.map { $0["start"] }, ["2026-10-06T09:00:00+03:00", "2026-10-06T13:00:00+03:00"])
+        XCTAssertEqual(slots.map { $0["optional_busy"] }, [[], ["petrov@corp.ru"]])
+        let attendees = result.structured?["attendees"]?.arrayValue ?? []
+        XCTAssertEqual(attendees.map { $0["availability"] }, ["ok", "no_data", "no_data", "ok"])
+        XCTAssertEqual(attendees.first?["name"], "Иванов Иван")
+        XCTAssertNotNil(result.structured?["note"]?.stringValue)
+    }
+
+    func testFreeSlotsNeedPeopleAndADuration() async {
+        let (tools, _) = makeTools(events: [])
+        let noPeople = await tools.call(name: "find_free_slots", arguments: ["duration_minutes": 30])
+        XCTAssertTrue(noPeople.isError)
+        let noDuration = await tools.call(name: "find_free_slots", arguments: ["required": ["a@corp.ru"]])
+        XCTAssertTrue(noDuration.isError)
+        let past = await tools.call(name: "find_free_slots", arguments: ["required": ["a@corp.ru"], "duration_minutes": 30, "to": "2026-10-05T10:00"])
+        XCTAssertTrue(past.isError)
     }
 
     // MARK: - create_meeting
