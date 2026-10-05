@@ -1,40 +1,61 @@
 import Foundation
 
-/// The six read-only MCP tools, implemented over `CalendarService`.
+/// The MCP tools, implemented over `CalendarService`: six that read the calendar, `find_people`
+/// and `create_meeting`.
 ///
-/// Everything except meeting details reads the in-memory calendar: no network, no load on
-/// Exchange. Data is limited to the sync window (start of day -7 days ... now +30 days), and every
+/// The calendar tools read the in-memory calendar: no network, no load on Exchange, except for
+/// meeting details. Data is limited to the sync window (start of day -7 days ... now +30 days), and every
 /// answer says how fresh it is (`data_as_of`, `coverage`, `sync_state`), because `events` may come
 /// from a days-old disk cache or survive a failed sync.
 @MainActor
 final class MCPCalendarTools {
     static let maxNetworkRequestsPerPersonSearch = 40
     static let maxBodyCharacters = 8_000
+    /// TypeScript SDK clients give up on a request after 60 seconds: the user's answer has to
+    /// come back well before that, or the meeting gets created for a call nobody awaits.
+    static let confirmationTimeout: TimeInterval = 45
+    /// A repeated identical `create_meeting` within this window is answered from the first one.
+    /// Models retry after a timeout, and a duplicate meeting sends a second set of invitations.
+    static let duplicateWindow: TimeInterval = 10 * 60
+    static let maxAttendees = 100
 
     private let calendarService: CalendarService
     private let accessGuard: MCPAccessGuard
     private let detailsCache: MCPEventDetailsCache
     private let clock: () -> Date
     private let isEnabled: () -> Bool
+    private let canCreateMeetings: () -> Bool
+    private let confirmer: MCPMeetingConfirming
+    private let confirmationTimeout: TimeInterval
     private let timeZoneProvider: () -> TimeZone
+    /// Names seen next to addresses in `find_people` answers, for the confirmation panel.
+    private var namesByEmail: [String: String] = [:]
+    private var recentCreations: [String: (date: Date, result: [String: JSONValue])] = [:]
+    private var isCreatingMeeting = false
 
     init(
         calendarService: CalendarService,
         accessGuard: MCPAccessGuard? = nil,
         detailsCache: MCPEventDetailsCache = MCPEventDetailsCache(),
+        confirmer: MCPMeetingConfirming? = nil,
+        confirmationTimeout: TimeInterval = MCPCalendarTools.confirmationTimeout,
         clock: @escaping () -> Date = { Date() },
         timeZone: @escaping () -> TimeZone = { AppTimeZone.zone },
-        isEnabled: @escaping () -> Bool = { true }
+        isEnabled: @escaping () -> Bool = { true },
+        canCreateMeetings: @escaping () -> Bool = { false }
     ) {
         self.calendarService = calendarService
         self.accessGuard = accessGuard ?? MCPAccessGuard(calendarService: calendarService, clock: clock)
         self.detailsCache = detailsCache
+        self.confirmer = confirmer ?? MCPMeetingConfirmationController()
+        self.confirmationTimeout = confirmationTimeout
         self.clock = clock
         self.timeZoneProvider = timeZone
         self.isEnabled = isEnabled
+        self.canCreateMeetings = canCreateMeetings
     }
 
-    func call(name: String, arguments: [String: JSONValue]) async -> MCPToolResult {
+    func call(name: String, arguments: [String: JSONValue], client: String? = nil) async -> MCPToolResult {
         guard isEnabled() else {
             return .failure("Access for AI assistants is turned off in OWA Widget (Settings → MCP). Ask the user to turn it on.")
         }
@@ -47,6 +68,8 @@ final class MCPCalendarTools {
             case "get_schedule_stats": return try getScheduleStats(arguments, context)
             case "find_events_with_person": return try await findEventsWithPerson(arguments, context)
             case "get_event_details": return try await getEventDetails(arguments, context)
+            case "find_people": return try await findPeople(arguments, context)
+            case "create_meeting": return try await createMeeting(arguments, context, client: client)
             default: return .failure("Unknown tool: \(name)")
             }
         } catch let error as ArgumentError {
@@ -455,6 +478,252 @@ final class MCPCalendarTools {
         } else {
             result["body"] = .string(text)
         }
+    }
+
+    // MARK: - find_people
+
+    private func findPeople(_ arguments: [String: JSONValue], _ context: CallContext) async throws -> MCPToolResult {
+        let query = arguments["query"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard query.count >= 2 else {
+            throw ArgumentError("`query` needs at least 2 characters: a name, a surname or an email address")
+        }
+        let limit = try optionalInt(arguments, "limit", range: 1...25) ?? 10
+        let account = try exchangeAccount(arguments)
+
+        if let denial = accessGuard.permitRequest() {
+            return .failure(denial.message)
+        }
+        await accessGuard.acquireSlot()
+        defer { accessGuard.releaseSlot() }
+        let people: [ResolvedAttendee]
+        do {
+            people = try await calendarService.findPeople(query: query, accountID: account.id)
+        } catch {
+            accessGuard.report(error, context: "mcp.findPeople")
+            if let reason = MCPAccessGuard.blockReason(calendarService.syncStatus) {
+                return .failure(reason)
+            }
+            return .failure("Address book search failed: \(error.localizedDescription)")
+        }
+
+        let ownDomain = await ownMailDomain(account)
+        for person in people where !person.displayName.isEmpty {
+            namesByEmail[person.email.lowercased()] = person.displayName
+        }
+        var result = commonFields(context)
+        result["people"] = .array(people.prefix(limit).map { person in
+            var fields: [String: JSONValue] = [
+                "name": .string(person.displayName),
+                "email": .string(person.email),
+                "external": .bool(Self.isExternal(person.email, ownDomain: ownDomain)),
+            ]
+            if let title = person.jobTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
+                fields["job_title"] = .string(title)
+            }
+            return .object(fields)
+        })
+        result["total"] = .int(Int64(people.count))
+        result["truncated"] = .bool(people.count > limit)
+        return .success(result)
+    }
+
+    // MARK: - create_meeting
+
+    private func createMeeting(_ arguments: [String: JSONValue], _ context: CallContext, client: String?) async throws -> MCPToolResult {
+        guard canCreateMeetings() else {
+            return .failure(
+                "Creating meetings is turned off in OWA Widget (Settings → MCP → \"Allow creating meetings\"). Nothing was created. Ask the user to turn it on."
+            )
+        }
+        let title = arguments["title"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !title.isEmpty, title.count <= 255 else { throw ArgumentError("`title` is required, up to 255 characters") }
+        let start = try requiredDateTime(arguments, "start", context)
+        let end = try requiredDateTime(arguments, "end", context)
+        guard end > start else { throw ArgumentError("`end` must be later than `start`") }
+        guard end.timeIntervalSince(start) <= 24 * 3600 else { throw ArgumentError("A meeting can last at most 24 hours") }
+        guard start > context.now else { throw ArgumentError("`start` is in the past (now is \(context.coder.string(context.now)))") }
+        guard start < context.now.addingTimeInterval(366 * 86400) else { throw ArgumentError("`start` is more than a year ahead") }
+        let required = try emailList(arguments, "required")
+        let optional = try emailList(arguments, "optional").filter { !required.contains($0) }
+        guard required.count + optional.count <= Self.maxAttendees else {
+            throw ArgumentError("At most \(Self.maxAttendees) attendees")
+        }
+        let location = arguments["location"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard location.count <= 255 else { throw ArgumentError("`location` is limited to 255 characters") }
+        let agenda = arguments["agenda"]?.stringValue ?? ""
+        guard agenda.count <= Self.maxBodyCharacters else {
+            throw ArgumentError("`agenda` is limited to \(Self.maxBodyCharacters) characters")
+        }
+        let account = try exchangeAccount(arguments)
+
+        let key = [
+            account.id.uuidString, context.coder.string(start), context.coder.string(end), title.lowercased(),
+            required.sorted().joined(separator: ","), optional.sorted().joined(separator: ","),
+        ].joined(separator: "|")
+        recentCreations = recentCreations.filter { context.now.timeIntervalSince($0.value.date) < Self.duplicateWindow }
+        if let earlier = recentCreations[key] {
+            var result = earlier.result
+            result["duplicate"] = true
+            result["note"] = "This exact meeting was already created a few minutes ago; nothing new was sent."
+            return .success(result)
+        }
+        guard !isCreatingMeeting else {
+            return .failure("Another meeting is waiting for the user's answer in OWA Widget. Wait for that call to finish before asking again.")
+        }
+        if let reason = MCPAccessGuard.blockReason(calendarService.syncStatus) {
+            return .failure(reason)
+        }
+        isCreatingMeeting = true
+        defer { isCreatingMeeting = false }
+
+        let ownDomain = await ownMailDomain(account)
+        let attendee = { (email: String) in
+            MCPMeetingProposal.Attendee(email: email, name: self.knownName(email), isExternal: Self.isExternal(email, ownDomain: ownDomain))
+        }
+        let conflicts = calendarService.events
+            .filter {
+                $0.accountID == account.id && !$0.isAllDay && !$0.isEffectivelyCancelled
+                    && $0.responseType != .declined && $0.startDate < end && $0.endDate > start
+            }
+            .sorted { $0.startDate < $1.startDate }
+        let proposal = MCPMeetingProposal(
+            title: title,
+            start: start,
+            end: end,
+            required: required.map(attendee),
+            optional: optional.map(attendee),
+            location: location,
+            agenda: agenda,
+            conflicts: conflicts.map { .init(title: $0.title, start: $0.startDate, end: $0.endDate) },
+            client: client ?? ""
+        )
+
+        switch await confirmer.confirm(proposal, timeout: confirmationTimeout) {
+        case .confirmed:
+            break
+        case .rejected:
+            return .failure("The user declined in OWA Widget. Nothing was created; do not retry unless the user asks.")
+        case .timedOut:
+            return .failure("The user did not answer in OWA Widget within \(Int(confirmationTimeout)) seconds. Nothing was created; ask the user whether to try again.")
+        case .cancelled:
+            return .failure("The request was cancelled. Nothing was created.")
+        }
+
+        // Past "Create" the request must finish even if the client cancels now: a half-sent
+        // CreateItem would leave the user unsure whether invitations went out.
+        let service = calendarService
+        let toResolved = { (people: [MCPMeetingProposal.Attendee]) in
+            people.map { ResolvedAttendee(displayName: $0.name ?? $0.email, email: $0.email, jobTitle: nil) }
+        }
+        let creation = Task { @MainActor in
+            try await service.createMeeting(
+                title: title,
+                agenda: agenda,
+                location: location,
+                slot: FreeSlot(start: start, end: end),
+                requiredAttendees: toResolved(proposal.required),
+                optionalAttendees: toResolved(proposal.optional),
+                accountID: account.id
+            )
+        }
+        do {
+            try await creation.value
+        } catch {
+            MCPDebugLog.log("create_meeting failed: \(error.localizedDescription)")
+            return .failure(
+                "Exchange did not confirm the meeting: \(error.localizedDescription). It may still have been created: check list_events after the next sync before trying again."
+            )
+        }
+
+        var result = commonFields(context)
+        result["created"] = true
+        result["title"] = .string(title)
+        result["start"] = .string(context.coder.string(start))
+        result["end"] = .string(context.coder.string(end))
+        result["account_id"] = .string(account.id.uuidString)
+        result["required"] = .array(required.map(JSONValue.string))
+        result["optional"] = .array(optional.map(JSONValue.string))
+        result["invitations_sent"] = .bool(!(required.isEmpty && optional.isEmpty))
+        result["note"] = "Created in Exchange. It appears in list_events after the next sync, within a few minutes."
+        recentCreations[key] = (context.now, result)
+        return .success(result)
+    }
+
+    /// Only Exchange creates meetings and searches the address book. With one Exchange account
+    /// `account_id` may be left out.
+    private func exchangeAccount(_ arguments: [String: JSONValue]) throws -> CalendarAccount {
+        let exchange = calendarService.accounts.filter { $0.accountType == .owa }
+        if let id = try optionalAccountID(arguments) {
+            guard let account = calendarService.accounts.first(where: { $0.id == id }) else {
+                throw ArgumentError("Unknown `account_id`; take one from get_status")
+            }
+            guard account.accountType == .owa else {
+                throw ArgumentError("Only Exchange accounts (type `exchange` in get_status) support this")
+            }
+            return account
+        }
+        switch exchange.count {
+        case 1: return exchange[0]
+        case 0: throw ArgumentError("No Exchange account is connected in OWA Widget")
+        default: throw ArgumentError("Several Exchange accounts are connected: pass `account_id` from get_status")
+        }
+    }
+
+    private func ownMailDomain(_ account: CalendarAccount) async -> String? {
+        guard let email = await calendarService.ownEmail(accountID: account.id) else { return nil }
+        return Self.domain(of: email)
+    }
+
+    /// From `find_people`, else from attendee lists already loaded.
+    private func knownName(_ email: String) -> String? {
+        if let name = namesByEmail[email] { return name }
+        for event in calendarService.events {
+            for attendee in localAttendees(event) ?? [] where attendee.email?.lowercased() == email {
+                if !attendee.name.isEmpty { return attendee.name }
+            }
+        }
+        return nil
+    }
+
+    private func requiredDateTime(_ arguments: [String: JSONValue], _ key: String, _ context: CallContext) throws -> Date {
+        guard let text = arguments[key]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
+            throw ArgumentError("`\(key)` is required: an ISO 8601 date-time")
+        }
+        // A bare date would silently mean midnight.
+        guard text.count > 10, let date = context.coder.parse(text, as: .start) else {
+            throw ArgumentError("Invalid `\(key)`: use an ISO 8601 date-time such as 2026-10-06T15:00")
+        }
+        return date
+    }
+
+    private func emailList(_ arguments: [String: JSONValue], _ key: String) throws -> [String] {
+        guard let value = arguments[key], value != .null else { return [] }
+        guard let array = value.arrayValue else { throw ArgumentError("`\(key)` must be an array of email addresses") }
+        var seen = Set<String>()
+        return try array.compactMap { item in
+            guard let text = item.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+                  Self.isEmailAddress(text) else {
+                throw ArgumentError("`\(key)` must hold email addresses (find them with find_people), got \(item)")
+            }
+            return seen.insert(text).inserted ? text : nil
+        }
+    }
+
+    static func isEmailAddress(_ text: String) -> Bool {
+        let parts = text.split(separator: "@", omittingEmptySubsequences: false)
+        guard parts.count == 2, !parts[0].isEmpty, parts[1].contains("."),
+              !parts[1].hasPrefix("."), !parts[1].hasSuffix(".") else { return false }
+        return !text.contains(where: { $0.isWhitespace || "<>,;\"()[]\\".contains($0) })
+    }
+
+    static func domain(of email: String) -> String? {
+        email.split(separator: "@").last.map { $0.lowercased() }
+    }
+
+    /// Outside the user's own domain, or a subdomain of it. Unknown own domain: not flagged.
+    static func isExternal(_ email: String, ownDomain: String?) -> Bool {
+        guard let ownDomain, let domain = domain(of: email) else { return false }
+        return domain != ownDomain && !domain.hasSuffix("." + ownDomain)
     }
 
     // MARK: - Details loading

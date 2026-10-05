@@ -1,7 +1,8 @@
 import Foundation
 
-/// Gatekeeper for the only network request the MCP server makes: `GetCalendarEvent` (one
-/// meeting's attendees and agenda).
+/// Gatekeeper for the MCP server's read requests to Exchange: `GetCalendarEvent` (one meeting's
+/// attendees and agenda) and the address book search. Creating a meeting waits for the user
+/// instead and only checks that sync is not blocked.
 ///
 /// - Refuses outright while sync is blocked (rejected password, untrusted certificate,
 ///   unapproved login host). Each OWA call re-submits credentials once on 401/440, so an agent
@@ -63,8 +64,8 @@ final class MCPAccessGuard {
         }
     }
 
-    func report(_ error: Error) {
-        calendarService.reportExternalRequestFailure(error, context: "mcp.getCalendarEvent")
+    func report(_ error: Error, context: String = "mcp.getCalendarEvent") {
+        calendarService.reportExternalRequestFailure(error, context: context)
     }
 
     var isBlocked: Bool { calendarService.syncStatus.blocksSync }

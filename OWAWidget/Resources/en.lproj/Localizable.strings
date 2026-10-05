@@ -433,7 +433,22 @@
 /* MCP server (settings tab) */
 "settings.tab.mcp" = "AI (MCP)";
 "mcp.enabled" = "Allow AI assistants to read the calendar (MCP)";
-"mcp.description" = "Claude, Cursor and other MCP clients can see your meetings for the last 7 days and the next 30, and answer questions about your schedule. Read only: nothing in the calendar or mail can be changed.";
+"mcp.description" = "Claude, Cursor and other MCP clients can see your meetings for the last 7 days and the next 30, answer questions about your schedule and look people up in the address book. Read only unless allowed below.";
+"mcp.createMeetings" = "Allow creating meetings";
+"mcp.createMeetings.description" = "The AI assistant can propose a meeting with invitations. You confirm each one in an OWA Widget window: nothing is sent until you press Create.";
+"mcp.confirm.title" = "%@ wants to create a meeting";
+"mcp.confirm.titleUnknownClient" = "An AI assistant wants to create a meeting";
+"mcp.confirm.countdown" = "Waiting %d s for your answer";
+"mcp.confirm.reject" = "Cancel";
+"mcp.confirm.create" = "Create";
+"mcp.confirm.noAttendees" = "No attendees: the meeting is only added to your calendar and no invitations are sent.";
+"mcp.confirm.required" = "Required";
+"mcp.confirm.optional" = "Optional";
+"mcp.confirm.external" = "external";
+"mcp.confirm.externalWarning" = "Some attendees are outside your organization.";
+"mcp.confirm.invitationsNote" = "Invitations go out as soon as you press Create.";
+"mcp.confirm.more" = "and %d more";
+"mcp.confirm.conflicts" = "Overlaps your meetings";
 "mcp.privacy.warning" = "Meeting titles, locations and descriptions, and the names and addresses of attendees, will be sent to the AI service you use. Check that your company's policy allows this.";
 "mcp.status" = "Status";
 "mcp.status.stopped" = "Not started";

@@ -707,6 +707,13 @@ final class CalendarService: ObservableObject {
         return try await provider.getUserAvailability(emails: emails, from: start, to: end)
     }
 
+    /// The user's own address in that account (Exchange resolves it from the login once and
+    /// caches it). `nil` when unknown.
+    func ownEmail(accountID: UUID) async -> String? {
+        guard let provider = providers.first(where: { $0.account.id == accountID }) else { return nil }
+        return try? await provider.resolveOrganizerSMTPEmail()
+    }
+
     func findFreeSlots(
         requiredEmails: [String],
         optionalEmails: [String] = [],

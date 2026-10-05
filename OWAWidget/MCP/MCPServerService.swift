@@ -10,6 +10,9 @@ import OWAWidgetMCPShared
 final class MCPServerService: ObservableObject {
     static let shared = MCPServerService()
     static let enabledDefaultsKey = "mcpServerEnabled"
+    /// Off by default and separate from the main switch: reading the calendar and sending
+    /// invitations on the user's behalf are different decisions.
+    static let createMeetingsDefaultsKey = "mcpCreateMeetingsEnabled"
     static let journalLimit = 50
 
     enum Status: Equatable {
@@ -43,6 +46,13 @@ final class MCPServerService: ObservableObject {
             MCPDebugLog.log("enabled=\(isEnabled)")
         }
     }
+    @Published var canCreateMeetings: Bool = UserDefaults.standard.bool(forKey: MCPServerService.createMeetingsDefaultsKey) {
+        didSet {
+            guard canCreateMeetings != oldValue else { return }
+            UserDefaults.standard.set(canCreateMeetings, forKey: Self.createMeetingsDefaultsKey)
+            MCPDebugLog.log("createMeetings=\(canCreateMeetings)")
+        }
+    }
 
     private(set) var socketPath: String = ""
     private var listener: MCPSocketListener?
@@ -60,7 +70,8 @@ final class MCPServerService: ObservableObject {
 
         let calendarTools = MCPCalendarTools(
             calendarService: calendarService,
-            isEnabled: { UserDefaults.standard.bool(forKey: MCPServerService.enabledDefaultsKey) }
+            isEnabled: { UserDefaults.standard.bool(forKey: MCPServerService.enabledDefaultsKey) },
+            canCreateMeetings: { UserDefaults.standard.bool(forKey: MCPServerService.createMeetingsDefaultsKey) }
         )
         toolbox = MCPToolbox(calendarTools: calendarTools) { tool, client, isError in
             MCPServerService.shared.record(tool: tool, client: client, isError: isError)

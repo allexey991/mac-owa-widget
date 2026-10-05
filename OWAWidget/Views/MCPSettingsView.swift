@@ -30,6 +30,14 @@ struct MCPSettingsView: View {
                 LabeledContent(localization.tr("mcp.status"), value: statusText)
             }
 
+            Section {
+                Toggle(localization.tr("mcp.createMeetings"), isOn: $server.canCreateMeetings)
+                    .disabled(!server.isEnabled)
+                Text(localization.tr("mcp.createMeetings.description"))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+
             Section(localization.tr("mcp.connect.section")) {
                 if server.isBridgeInstalled {
                     ForEach(Snippet.allCases) { snippet in

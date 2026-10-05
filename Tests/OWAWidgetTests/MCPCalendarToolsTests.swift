@@ -9,12 +9,41 @@ final class MCPCalendarToolsTests: XCTestCase {
         nonisolated let account: CalendarAccount
         private let attendeesByID: [String: [EventAttendee]]
         private let error: Error?
+        private let people: [ResolvedAttendee]
+        private let ownEmail: String?
         private(set) var detailCalls: [String] = []
+        private(set) var created: [(title: String, start: Date, required: [String], optional: [String])] = []
 
-        init(account: CalendarAccount, attendeesByID: [String: [EventAttendee]] = [:], error: Error? = nil) {
+        init(
+            account: CalendarAccount,
+            attendeesByID: [String: [EventAttendee]] = [:],
+            error: Error? = nil,
+            people: [ResolvedAttendee] = [],
+            ownEmail: String? = nil
+        ) {
             self.account = account
             self.attendeesByID = attendeesByID
             self.error = error
+            self.people = people
+            self.ownEmail = ownEmail
+        }
+
+        func findPeople(query: String) async throws -> [ResolvedAttendee] {
+            people.filter { $0.displayName.localizedCaseInsensitiveContains(query) || $0.email.contains(query.lowercased()) }
+        }
+
+        func resolveOrganizerSMTPEmail() async throws -> String? { ownEmail }
+
+        func createMeeting(
+            title: String,
+            agenda: String,
+            location: String,
+            start: Date,
+            end: Date,
+            requiredAttendees: [ResolvedAttendee],
+            optionalAttendees: [ResolvedAttendee]
+        ) async throws {
+            created.append((title, start, requiredAttendees.map(\.email), optionalAttendees.map(\.email)))
         }
 
         func fetchEvents(from start: Date, to end: Date) async throws -> [CalendarEvent] { [] }
@@ -24,6 +53,19 @@ final class MCPCalendarToolsTests: XCTestCase {
             detailCalls.append(event.id)
             if let error { throw error }
             return CalendarEventDetails(attendees: attendeesByID[event.id] ?? [], body: "Agenda of \(event.id)")
+        }
+    }
+
+    /// Stands in for the panel: answers with `outcome` and records what the user would have seen.
+    private final class FakeConfirmer: MCPMeetingConfirming {
+        var outcome: MCPConfirmationOutcome
+        private(set) var proposals: [MCPMeetingProposal] = []
+
+        init(_ outcome: MCPConfirmationOutcome) { self.outcome = outcome }
+
+        func confirm(_ proposal: MCPMeetingProposal, timeout: TimeInterval) async -> MCPConfirmationOutcome {
+            proposals.append(proposal)
+            return outcome
         }
     }
 
@@ -63,7 +105,9 @@ final class MCPCalendarToolsTests: XCTestCase {
     private func makeTools(
         events: [CalendarEvent],
         provider: DetailsProvider? = nil,
-        enabled: Bool = true
+        enabled: Bool = true,
+        confirmer: FakeConfirmer = FakeConfirmer(.rejected),
+        canCreateMeetings: Bool = true
     ) -> (MCPCalendarTools, CalendarService) {
         let providers: [any CalendarProvider] = [provider ?? DetailsProvider(account: exchange), DetailsProvider(account: local)]
         let service = CalendarService(
@@ -75,6 +119,7 @@ final class MCPCalendarToolsTests: XCTestCase {
             clock: { [now] in now }
         )
         service.replaceEventsForTests(events)
+        service.replaceAccountsForTests([exchange, local])
         // The real sync window: start of day -7 days ... now +30 days.
         service.setEventCoverageForTests(EventCoverage(
             start: date(5, 0).addingTimeInterval(-7 * 86400),
@@ -83,9 +128,11 @@ final class MCPCalendarToolsTests: XCTestCase {
         ))
         let tools = MCPCalendarTools(
             calendarService: service,
+            confirmer: confirmer,
             clock: { [now] in now },
             timeZone: { [zone] in zone },
-            isEnabled: { enabled }
+            isEnabled: { enabled },
+            canCreateMeetings: { canCreateMeetings }
         )
         return (tools, service)
     }
@@ -372,6 +419,141 @@ final class MCPCalendarToolsTests: XCTestCase {
         let (tools, _) = makeTools(events: [])
         let result = await tools.call(name: "get_event_details", arguments: ["event_id": "0123456789ab"])
         XCTAssertTrue(result.isError)
+    }
+
+    // MARK: - find_people
+
+    private let ivanov = ResolvedAttendee(displayName: "Иванов Иван", email: "ivanov@corp.ru", jobTitle: "Разработчик")
+    private let partner = ResolvedAttendee(displayName: "Partner Ivanov", email: "ivanov@partner.com", jobTitle: nil)
+
+    func testFindPeopleMarksAddressesOutsideTheUsersDomain() async {
+        let provider = DetailsProvider(account: exchange, people: [ivanov, partner], ownEmail: "me@corp.ru")
+        let (tools, _) = makeTools(events: [], provider: provider)
+
+        let result = await tools.call(name: "find_people", arguments: ["query": "Ivanov"]).structured
+        let people = result?["people"]?.arrayValue ?? []
+
+        XCTAssertEqual(people.map { $0["email"] }, ["ivanov@corp.ru", "ivanov@partner.com"])
+        XCTAssertEqual(people.map { $0["external"] }, [false, true])
+        XCTAssertEqual(people.first?["job_title"], "Разработчик")
+    }
+
+    func testFindPeopleNeedsAQueryAndAnExchangeAccount() async {
+        let (tools, _) = makeTools(events: [])
+        let short = await tools.call(name: "find_people", arguments: ["query": "I"])
+        XCTAssertTrue(short.isError)
+        let local = await tools.call(name: "find_people", arguments: ["query": "Ivanov", "account_id": .string(local.id.uuidString)])
+        XCTAssertTrue(local.isError)
+    }
+
+    // MARK: - create_meeting
+
+    private var meetingArguments: [String: JSONValue] {
+        [
+            "title": "Синк по релизу",
+            "start": "2026-10-06T15:00",
+            "end": "2026-10-06T15:30",
+            "required": ["ivanov@corp.ru", "IVANOV@corp.ru"],
+            "optional": ["ivanov@partner.com"],
+        ]
+    }
+
+    func testCreateMeetingIsOffUntilTheUserAllowsIt() async {
+        let provider = DetailsProvider(account: exchange)
+        let confirmer = FakeConfirmer(.confirmed)
+        let (tools, _) = makeTools(events: [], provider: provider, confirmer: confirmer, canCreateMeetings: false)
+
+        let result = await tools.call(name: "create_meeting", arguments: meetingArguments)
+
+        XCTAssertTrue(result.isError)
+        XCTAssertTrue(confirmer.proposals.isEmpty)
+        let created = await provider.created
+        XCTAssertTrue(created.isEmpty)
+    }
+
+    func testCreateMeetingShowsTheMeetingAndCreatesItOnlyAfterConfirmation() async {
+        let provider = DetailsProvider(account: exchange, people: [ivanov, partner], ownEmail: "me@corp.ru")
+        let confirmer = FakeConfirmer(.confirmed)
+        let (tools, _) = makeTools(events: [
+            event("busy", day: 6, hour: 15),
+            event("declined", day: 6, hour: 15, response: .declined),
+        ], provider: provider, confirmer: confirmer)
+        _ = await tools.call(name: "find_people", arguments: ["query": "Ivanov"])
+
+        let result = await tools.call(name: "create_meeting", arguments: meetingArguments, client: "Claude Code")
+
+        XCTAssertFalse(result.isError, result.errorMessage ?? "")
+        XCTAssertEqual(result.structured?["created"], true)
+        XCTAssertEqual(result.structured?["invitations_sent"], true)
+        let proposal = confirmer.proposals.first
+        XCTAssertEqual(proposal?.client, "Claude Code")
+        XCTAssertEqual(proposal?.start, date(6, 15))
+        // Duplicates collapse; names come from the address book; the partner is flagged.
+        XCTAssertEqual(proposal?.required, [.init(email: "ivanov@corp.ru", name: "Иванов Иван", isExternal: false)])
+        XCTAssertEqual(proposal?.optional, [.init(email: "ivanov@partner.com", name: "Partner Ivanov", isExternal: true)])
+        // A declined meeting is not a conflict.
+        XCTAssertEqual(proposal?.conflicts.map(\.title), ["busy"])
+        let created = await provider.created
+        XCTAssertEqual(created.map(\.title), ["Синк по релизу"])
+        XCTAssertEqual(created.first?.required, ["ivanov@corp.ru"])
+        XCTAssertEqual(created.first?.optional, ["ivanov@partner.com"])
+    }
+
+    func testDeclinedOrUnansweredConfirmationCreatesNothing() async {
+        for outcome in [MCPConfirmationOutcome.rejected, .timedOut, .cancelled] {
+            let provider = DetailsProvider(account: exchange)
+            let (tools, _) = makeTools(events: [], provider: provider, confirmer: FakeConfirmer(outcome))
+
+            let result = await tools.call(name: "create_meeting", arguments: meetingArguments)
+
+            XCTAssertTrue(result.isError, "\(outcome)")
+            XCTAssertTrue(result.errorMessage?.contains("Nothing was created") == true, "\(outcome)")
+            let created = await provider.created
+            XCTAssertTrue(created.isEmpty, "\(outcome)")
+        }
+    }
+
+    func testRepeatedCallReturnsTheFirstMeetingInsteadOfASecondOne() async {
+        let provider = DetailsProvider(account: exchange)
+        let confirmer = FakeConfirmer(.confirmed)
+        let (tools, _) = makeTools(events: [], provider: provider, confirmer: confirmer)
+
+        _ = await tools.call(name: "create_meeting", arguments: meetingArguments)
+        let second = await tools.call(name: "create_meeting", arguments: meetingArguments).structured
+
+        XCTAssertEqual(second?["duplicate"], true)
+        XCTAssertEqual(confirmer.proposals.count, 1)
+        let created = await provider.created
+        XCTAssertEqual(created.count, 1)
+    }
+
+    func testCreateMeetingRejectsBadArgumentsBeforeAskingTheUser() async {
+        let confirmer = FakeConfirmer(.confirmed)
+        let (tools, _) = makeTools(events: [], confirmer: confirmer)
+        let broken: [[String: JSONValue]] = [
+            ["title": "x", "start": "2026-10-06", "end": "2026-10-06T15:30"],
+            ["title": "x", "start": "2026-10-05T09:00", "end": "2026-10-05T09:30"],
+            ["title": "x", "start": "2026-10-06T15:00", "end": "2026-10-06T14:00"],
+            ["title": "x", "start": "2026-10-06T15:00", "end": "2026-10-08T15:00"],
+            ["title": " ", "start": "2026-10-06T15:00", "end": "2026-10-06T15:30"],
+            ["title": "x", "start": "2026-10-06T15:00", "end": "2026-10-06T15:30", "required": ["Иванов"]],
+            ["title": "x", "start": "2026-10-06T15:00", "end": "2026-10-06T15:30", "account_id": .string(local.id.uuidString)],
+        ]
+        for arguments in broken {
+            let result = await tools.call(name: "create_meeting", arguments: arguments)
+            XCTAssertTrue(result.isError, "\(arguments)")
+        }
+        XCTAssertTrue(confirmer.proposals.isEmpty)
+    }
+
+    func testExternalAddressDetection() {
+        XCTAssertFalse(MCPCalendarTools.isExternal("a@corp.ru", ownDomain: "corp.ru"))
+        XCTAssertFalse(MCPCalendarTools.isExternal("a@mail.corp.ru", ownDomain: "corp.ru"))
+        XCTAssertTrue(MCPCalendarTools.isExternal("a@evilcorp.ru", ownDomain: "corp.ru"))
+        XCTAssertFalse(MCPCalendarTools.isExternal("a@evilcorp.ru", ownDomain: nil))
+        XCTAssertFalse(MCPCalendarTools.isEmailAddress("a@b"))
+        XCTAssertFalse(MCPCalendarTools.isEmailAddress("Ivan <a@b.ru>"))
+        XCTAssertTrue(MCPCalendarTools.isEmailAddress("ivan.ivanov@corp.ru"))
     }
 }
 

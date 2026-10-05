@@ -1,23 +1,30 @@
 import Foundation
 
-/// One MCP tool as advertised in `tools/list`. Every tool this server has is read-only.
+/// One MCP tool as advertised in `tools/list`.
 struct MCPToolDefinition: Sendable {
     let name: String
     let title: String
     let description: String
     let inputSchema: JSONValue
+    /// `false` only for `create_meeting`: it sends invitations to other people.
+    var isReadOnly = true
 
     var json: JSONValue {
-        [
+        var annotations: [String: JSONValue] = [
+            "title": .string(title),
+            "readOnlyHint": .bool(isReadOnly),
+            "openWorldHint": .bool(!isReadOnly),
+        ]
+        if !isReadOnly {
+            annotations["destructiveHint"] = false
+            annotations["idempotentHint"] = false
+        }
+        return [
             "name": .string(name),
             "title": .string(title),
             "description": .string(description),
             "inputSchema": inputSchema,
-            "annotations": [
-                "title": .string(title),
-                "readOnlyHint": true,
-                "openWorldHint": false,
-            ],
+            "annotations": .object(annotations),
         ]
     }
 }
