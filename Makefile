@@ -10,6 +10,14 @@ CODE_SIGN_IDENTITY ?= -
 # only such builds can be notarized. codesign matches the name by substring, so this picks the
 # certificate from the login Keychain; pass its SHA-1 if several Developer ID certificates match.
 RELEASE_SIGN_IDENTITY ?= Developer ID Application
+# `make run` signs with Developer ID when the login Keychain has it: Keychain "Always Allow" and
+# Calendar access then survive rebuilds, while an ad-hoc build asks again after every change
+# (its requirement is the cdhash). Without the certificate it falls back to ad-hoc. Recursive
+# `=`, so `security` runs only for `make run`. An explicit CODE_SIGN_IDENTITY wins.
+DEV_SIGN_IDENTITY = $(shell security find-identity -v -p codesigning 2>/dev/null | grep -q '"$(RELEASE_SIGN_IDENTITY)' && echo '$(RELEASE_SIGN_IDENTITY)' || echo -)
+RUN_SIGN_IDENTITY = $(if $(filter command line environment override,$(origin CODE_SIGN_IDENTITY)),$(CODE_SIGN_IDENTITY),$(DEV_SIGN_IDENTITY))
+# secure: Apple's timestamp server, required by notarization. none: local builds only.
+SIGN_TIMESTAMP ?= secure
 APP_BUNDLE_ID_BASE := com.owawidget.MacOwaWidget
 APP_BUNDLE_ID_DEV := $(APP_BUNDLE_ID_BASE).dev
 APP_BUNDLE_ID ?= $(APP_BUNDLE_ID_BASE)
@@ -76,16 +84,20 @@ bundle: build
 	@ditto "$(SPARKLE_FRAMEWORK)" "$(APP_PATH)/Contents/Frameworks/Sparkle.framework"
 	@# MCP bridge: the stdio binary MCP clients launch. It only relays to the app's Unix
 	@# socket; scripts/sign_app.sh signs it without entitlements (no network, no TCC).
+	@# rm first, never overwrite in place: MCP clients keep the bridge running across rebuilds,
+	@# and rewriting the file under a live process makes the kernel reject its next code page
+	@# (cs_mtime != mtime) and SIGKILL it. A fresh inode leaves the running copy intact.
 	@mkdir -p "$(APP_PATH)/Contents/Helpers"
+	@rm -f "$(APP_PATH)/Contents/Helpers/$(MCP_BRIDGE_NAME)"
 	@cp "$$(swift build $(SWIFT_BUILD_ARGS) --show-bin-path)/$(MCP_BRIDGE_PRODUCT)" "$(APP_PATH)/Contents/Helpers/$(MCP_BRIDGE_NAME)"
 	@# Signing (identity, entitlements, nested Sparkle helpers) lives in one script
 	@# shared with scripts/test_update_locally.sh; see the rationale there.
-	bash scripts/sign_app.sh "$(APP_PATH)" "$(CODE_SIGN_IDENTITY)"
+	bash scripts/sign_app.sh "$(APP_PATH)" "$(CODE_SIGN_IDENTITY)" "$(SIGN_TIMESTAMP)"
 	@echo "✓ Bundle ready: $(APP_PATH)"
 
 ## Release .app bundle: universal binary (Apple Silicon + Intel)
 release-bundle:
-	@$(MAKE) bundle SWIFT_BUILD_ARGS="$(RELEASE_SWIFT_BUILD_ARGS)" CODE_SIGN_IDENTITY="$(RELEASE_SIGN_IDENTITY)"
+	@$(MAKE) bundle SWIFT_BUILD_ARGS="$(RELEASE_SWIFT_BUILD_ARGS)" CODE_SIGN_IDENTITY="$(RELEASE_SIGN_IDENTITY)" SIGN_TIMESTAMP=secure
 	@codesign -dvv "$(APP_PATH)" 2>&1 | grep -q '^Authority=Developer ID Application:' || \
 	  (echo "Release bundle is not Developer ID signed (RELEASE_SIGN_IDENTITY=$(RELEASE_SIGN_IDENTITY))." >&2 && exit 1)
 	@lipo -info "$(APP_PATH)/Contents/MacOS/$(APP_NAME)" | grep -q 'x86_64' || \
@@ -115,7 +127,7 @@ kill:
 
 ## Build, bundle and launch
 run: kill
-	@$(MAKE) bundle APP_BUNDLE_ID="$(APP_BUNDLE_ID_DEV)"
+	@$(MAKE) bundle APP_BUNDLE_ID="$(APP_BUNDLE_ID_DEV)" CODE_SIGN_IDENTITY="$(RUN_SIGN_IDENTITY)" SIGN_TIMESTAMP=none
 	open $(APP_PATH)
 
 ## Clean build artifacts
@@ -168,4 +180,5 @@ help:
 	@echo "make kill    — stop running instance"
 	@echo "Local dev bundle id: $(APP_BUNDLE_ID_DEV)"
 	@echo "Release bundle id: $(APP_BUNDLE_ID_BASE)"
-	@echo "make run CODE_SIGN_IDENTITY='Apple Development: Name (TEAMID)' — launch with stable signing identity"
+	@echo "make run signs with Developer ID when the Keychain has it, otherwise ad-hoc"
+	@echo "make run CODE_SIGN_IDENTITY=- — force ad-hoc signing"

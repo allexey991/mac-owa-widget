@@ -5,10 +5,13 @@
 # Single place for signing, shared by `make bundle` and scripts/test_update_locally.sh, so the
 # update test exercises exactly the signature users get.
 #
-# Usage: scripts/sign_app.sh <path/to/OWAWidget.app> [identity]
+# Usage: scripts/sign_app.sh <path/to/OWAWidget.app> [identity] [timestamp]
 #   identity "-" (default) - ad-hoc, for local builds;
-#   any certificate name   - e.g. "Developer ID Application" for releases, or
+#   any certificate name   - e.g. "Developer ID Application" for releases and `make run`, or
 #                            "Apple Development: Name (TEAMID)" for a stable dev identity.
+#   timestamp "secure" (default) - a secure timestamp from Apple's server, which notarization
+#                            requires; "none" - no network round trip per signed item, for local
+#                            builds that are never notarized. Ignored for ad-hoc signing.
 #
 # Why the two entitlements files:
 #   Hardened runtime (--options runtime) is on for every identity. It turns on library
@@ -31,6 +34,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP="${1:?usage: sign_app.sh <app> [identity]}"
 IDENTITY="${2:--}"
+TIMESTAMP_MODE="${3:-secure}"
 FRAMEWORK="${APP}/Contents/Frameworks/Sparkle.framework"
 
 if [[ "${IDENTITY}" == "-" ]]; then
@@ -39,8 +43,13 @@ if [[ "${IDENTITY}" == "-" ]]; then
   TIMESTAMP=(--timestamp=none)
 else
   ENTITLEMENTS="${ROOT_DIR}/OWAWidget/OWAWidget.entitlements"
-  # Notarization rejects code without a secure timestamp.
-  TIMESTAMP=(--timestamp)
+  case "${TIMESTAMP_MODE}" in
+    # Notarization rejects code without a secure timestamp.
+    secure) TIMESTAMP=(--timestamp) ;;
+    # The timestamp server is a network call per item: slow, and it fails offline.
+    none) TIMESTAMP=(--timestamp=none) ;;
+    *) echo "sign_app.sh: timestamp must be secure or none, got '${TIMESTAMP_MODE}'" >&2; exit 2 ;;
+  esac
 fi
 
 sign() {

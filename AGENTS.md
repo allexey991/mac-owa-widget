@@ -103,8 +103,10 @@ swift build
 
 Для работы в Xcode открывай сам пакет: `open Package.swift`. Настройки сборки меняй в `Package.swift` и `Makefile`. Подпись живёт в `scripts/sign_app.sh` - его вызывают и `make bundle`, и стенд обновления. Entitlements два файла, общие ключи держи одинаковыми (только ASCII, см. комментарий в файлах):
 
-- `OWAWidget/OWAWidget.entitlements` - сборки с сертификатом (релизы Developer ID, Apple Development). Library validation включена: Sparkle переподписывается тем же Team ID.
-- `OWAWidget/OWAWidget-dev.entitlements` - ad-hoc сборки (`make bundle`, `make run` по умолчанию). Дополнительно `disable-library-validation`: у ad-hoc подписи нет Team ID, и без этого ключа Sparkle не загрузится.
+- `OWAWidget/OWAWidget.entitlements` - сборки с сертификатом (релизы Developer ID, `make run` при наличии Developer ID, Apple Development). Library validation включена: Sparkle переподписывается тем же Team ID.
+- `OWAWidget/OWAWidget-dev.entitlements` - ad-hoc сборки (`make bundle`, `make run` без сертификата в связке). Дополнительно `disable-library-validation`: у ad-hoc подписи нет Team ID, и без этого ключа Sparkle не загрузится.
+
+> **`make run` подписывает Developer ID, если сертификат есть в связке ключей.** Тогда «Разрешать всегда» в связке и доступ к Календарю переживают пересборки: у ad-hoc сборки requirement - `cdhash`, и диалог связки приходил после каждого изменения. Без сертификата `make run` подписывает ad-hoc, как раньше; `make run CODE_SIGN_IDENTITY=-` включает ad-hoc принудительно. Локальная подпись идёт без secure timestamp (`SIGN_TIMESTAMP=none`): метка нужна только нотаризации, а сервер меток - это сетевой запрос на каждый подписываемый объект, медленный и падающий без сети. Релиз (`make release-bundle`) всегда подписывается с меткой.
 
 > **`make bundle` перезаписывает `.build/OWAWidget.app` на месте.** Если приложение запущено оттуда, процесс падает с `SIGKILL (Code Signature Invalid)`: бинарь меняется под работающим кодом. Перед `make bundle`, `make release-bundle` и `make release-package` проверь `pgrep -fl ".build/OWAWidget.app/Contents/MacOS/OWAWidget"` и закрой приложение (или предупреди пользователя).
 
