@@ -61,11 +61,21 @@ final class MCPCalendarTools {
     private func getStatus(_ context: CallContext) -> MCPToolResult {
         var result = commonFields(context)
         result["accounts"] = .array(calendarService.accounts.map { account in
-            [
+            // `email` is the sign-in name: an address, or DOMAIN\login for some Exchange servers.
+            let login = account.email.trimmingCharacters(in: .whitespacesAndNewlines)
+            let email = login.contains("@") && !login.contains("\\") ? login : nil
+            let name = account.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            // The name is whatever the user typed in Settings, often nothing.
+            let fallbackName = login.isEmpty ? account.accountType.displayName : login
+            var fields: [String: JSONValue] = [
                 "account_id": .string(account.id.uuidString),
-                "name": .string(account.displayName),
+                "name": .string(name.isEmpty ? fallbackName : name),
                 "type": .string(Self.accountTypeName(account.accountType)),
+                // The user's own address tells them apart from the other attendees.
+                "email": .optional(email),
             ]
+            if email == nil, !login.isEmpty { fields["login"] = .string(login) }
+            return .object(fields)
         })
         return .success(result)
     }
@@ -254,20 +264,26 @@ final class MCPCalendarTools {
         }
         let limit = try optionalInt(arguments, "limit", range: 1...20) ?? 5
         let includeTitles = try optionalBool(arguments, "include_title_matches") ?? true
+        let includeSkipped = try optionalBool(arguments, "include_declined_and_cancelled") ?? false
 
         let now = context.now
-        let candidates = calendarService.events
+        let inRange = calendarService.events
             .filter { Self.overlaps($0, resolved.range) }
             .filter { accountID == nil || $0.accountID == accountID }
+        // A declined or cancelled meeting is not "the last time we met", as in the other tools.
+        let candidates = includeSkipped
+            ? inRange
+            : inRange.filter { !$0.isEffectivelyCancelled && $0.responseType != .declined }
         // Nearest first on both sides, so "when did we last meet" is answered by a few requests.
         let past = candidates.filter { $0.startDate < now }.sorted { $0.startDate > $1.startDate }
         let upcoming = candidates.filter { $0.startDate >= now }.sorted { $0.startDate < $1.startDate }
 
         // An address query can only match an organizer (sync knows organizers by name) through
-        // names already seen next to that address in a participant list.
+        // names already seen next to that address in a participant list. Skipped meetings still
+        // tell which name goes with the address.
         var knownNames = Set<String>()
         if matcher.isEmailQuery {
-            for event in candidates {
+            for event in inRange {
                 for attendee in localAttendees(event) ?? [] where matcher.matchesPerson(name: nil, email: attendee.email) {
                     knownNames.insert(EventPersonMatcher.normalizedName(attendee.name))
                 }

@@ -46,6 +46,7 @@ final class MCPCalendarToolsTests: XCTestCase {
         minutes: Int = 60,
         account: CalendarAccount? = nil,
         response: MeetingResponseType = .accepted,
+        cancelled: Bool = false,
         organizer: String? = nil,
         attendees: [EventAttendee]? = nil,
         joinURL: URL? = nil
@@ -54,7 +55,7 @@ final class MCPCalendarToolsTests: XCTestCase {
         return CalendarEvent(
             id: id, title: id, startDate: start, endDate: start.addingTimeInterval(TimeInterval(minutes * 60)),
             location: nil, bodyPreview: "preview \(id)", joinURL: joinURL, platform: joinURL == nil ? .generic : .teams,
-            isAllDay: false, organizer: organizer, accountID: (account ?? exchange).id, responseType: response,
+            isAllDay: false, organizer: organizer, accountID: (account ?? exchange).id, isCancelled: cancelled, responseType: response,
             changeKey: "ck-\(id)", detailedAttendees: attendees
         )
     }
@@ -110,6 +111,25 @@ final class MCPCalendarToolsTests: XCTestCase {
         XCTAssertEqual(status?["data_as_of"], "2026-10-05T11:55:00+03:00")
         XCTAssertNotNil(status?["coverage"]?["from"])
         XCTAssertEqual(status?["sync_state"], "idle")
+    }
+
+    func testStatusNamesEveryAccountAndGivesTheUsersAddress() async {
+        let (tools, service) = makeTools(events: [])
+        service.replaceAccountsForTests([
+            CalendarAccount(displayName: "", serverURL: "https://mail", email: "me@corp.ru", accountType: .owa),
+            CalendarAccount(displayName: " ", serverURL: "https://mail", email: "CORP\\me", accountType: .owa),
+            CalendarAccount(displayName: "", serverURL: "", email: "", accountType: .eventKit),
+            CalendarAccount(displayName: "Work", serverURL: "https://mail", email: "me@corp.ru", accountType: .owa),
+        ])
+
+        let accounts = await tools.call(name: "get_status", arguments: [:]).structured?["accounts"]?.arrayValue ?? []
+
+        XCTAssertEqual(accounts.map { $0["name"] }, ["me@corp.ru", "CORP\\me", "macOS Calendar", "Work"])
+        XCTAssertEqual(accounts.map { $0["email"] }, ["me@corp.ru", .null, .null, "me@corp.ru"])
+        // A DOMAIN\login is not an address, but still says who the user is.
+        XCTAssertEqual(accounts[1]["login"], "CORP\\me")
+        XCTAssertNil(accounts[0]["login"])
+        XCTAssertNil(accounts[2]["login"])
     }
 
     // MARK: - list_events
@@ -244,6 +264,27 @@ final class MCPCalendarToolsTests: XCTestCase {
         let result = await tools.call(name: "find_events_with_person", arguments: ["person": "Петров", "direction": "upcoming"]).structured
         XCTAssertEqual(ids(result?["upcoming"]), ["organized", "icloud"])
         XCTAssertEqual(result?["upcoming"]?.arrayValue?.map { $0["match"] }, ["organizer", "optional"])
+        let calls = await provider.detailCalls
+        XCTAssertTrue(calls.isEmpty)
+    }
+
+    func testPersonSearchSkipsDeclinedAndCancelledUnlessAsked() async {
+        let provider = DetailsProvider(account: exchange)
+        let (tools, _) = makeTools(events: [
+            event("met", day: 2, hour: 10, organizer: "Петров Пётр"),
+            event("declined", day: 5, hour: 9, response: .declined, organizer: "Петров Пётр"),
+            event("cancelled", day: 5, hour: 10, cancelled: true, organizer: "Петров Пётр"),
+        ], provider: provider)
+
+        let byDefault = await tools.call(name: "find_events_with_person", arguments: ["person": "Петров", "direction": "past"]).structured
+        // The last time they actually met, not the meeting the user declined.
+        XCTAssertEqual(ids(byDefault?["past"]), ["met"])
+
+        let all = await tools.call(
+            name: "find_events_with_person",
+            arguments: ["person": "Петров", "direction": "past", "include_declined_and_cancelled": true]
+        ).structured
+        XCTAssertEqual(ids(all?["past"]), ["cancelled", "declined", "met"])
         let calls = await provider.detailCalls
         XCTAssertTrue(calls.isEmpty)
     }

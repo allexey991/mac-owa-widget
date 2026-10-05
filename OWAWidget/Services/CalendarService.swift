@@ -651,6 +651,11 @@ final class CalendarService: ObservableObject {
         recalculateEngagementSnapshot()
     }
 
+    /// Sets the account list without touching the Keychain or the encrypted store.
+    func replaceAccountsForTests(_ accounts: [CalendarAccount]) {
+        self.accounts = accounts
+    }
+
     var meetingEngagementScope: MeetingEngagementScope {
         meetingEngagementStats.scope
     }
