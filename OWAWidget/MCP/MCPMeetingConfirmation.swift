@@ -6,8 +6,8 @@ struct MCPMeetingProposal: Equatable, Sendable {
     struct Attendee: Equatable, Sendable {
         let email: String
         let name: String?
-        /// Outside the user's own mail domain. `false` when the domain is unknown: the address is
-        /// on screen either way.
+        /// Outside the user's own mail domain. Always `false` when `externalCheckAvailable` is
+        /// `false`: the panel then says the check could not be made.
         let isExternal: Bool
     }
 
@@ -27,6 +27,8 @@ struct MCPMeetingProposal: Equatable, Sendable {
     let conflicts: [Conflict]
     /// The MCP client that asked ("Claude Code"), empty when unknown.
     let client: String
+    /// The user's own mail domain is known, so `isExternal` means something.
+    let externalCheckAvailable: Bool
 }
 
 enum MCPConfirmationOutcome: Equatable, Sendable {
@@ -44,17 +46,34 @@ protocol MCPMeetingConfirming: AnyObject {
     func confirm(_ proposal: MCPMeetingProposal, timeout: TimeInterval) async -> MCPConfirmationOutcome
 }
 
-/// Floating panel with "Create" and "Cancel". One at a time: a second request while one is on
-/// screen is refused by `MCPCalendarTools` before it gets here.
+/// Puts the question on screen. Split from the waiting logic so that can be tested without a
+/// window.
+@MainActor
+protocol MCPConfirmationPresenting: AnyObject {
+    func show(_ proposal: MCPMeetingProposal, deadline: Date, onConfirm: @escaping () -> Void, onReject: @escaping () -> Void)
+    func close()
+}
+
+/// Waits for exactly one answer per request: a button, the timeout or the client's cancellation,
+/// whichever comes first. One question at a time; a new one replaces the old, which counts as
+/// cancelled (`MCPCalendarTools` refuses a second request before it gets here anyway).
 @MainActor
 final class MCPMeetingConfirmationController: MCPMeetingConfirming {
-    private var panel: NSPanel?
+    private let presenter: MCPConfirmationPresenting
     private var pending: CheckedContinuation<MCPConfirmationOutcome, Never>?
     private var timeoutTask: Task<Void, Never>?
+    /// Which question the buttons belong to: a click that lands on a panel already answered or
+    /// replaced must not answer the next one.
+    private var generation = 0
+
+    init(presenter: MCPConfirmationPresenting? = nil) {
+        self.presenter = presenter ?? MCPConfirmationPanel()
+    }
 
     func confirm(_ proposal: MCPMeetingProposal, timeout: TimeInterval) async -> MCPConfirmationOutcome {
-        // A previous request still on screen loses: only one answer can be pending.
         finish(.cancelled)
+        generation += 1
+        let current = generation
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 if Task.isCancelled {
@@ -62,44 +81,54 @@ final class MCPMeetingConfirmationController: MCPMeetingConfirming {
                     return
                 }
                 pending = continuation
-                show(proposal, timeout: timeout)
+                presenter.show(
+                    proposal,
+                    deadline: Date().addingTimeInterval(timeout),
+                    onConfirm: { [weak self] in self?.finish(.confirmed, generation: current) },
+                    onReject: { [weak self] in self?.finish(.rejected, generation: current) }
+                )
                 timeoutTask = Task { [weak self] in
                     try? await Task.sleep(for: .seconds(timeout))
                     guard !Task.isCancelled else { return }
-                    self?.finish(.timedOut)
+                    self?.finish(.timedOut, generation: current)
                 }
             }
         } onCancel: {
-            Task { @MainActor [weak self] in self?.finish(.cancelled) }
+            Task { @MainActor [weak self] in self?.finish(.cancelled, generation: current) }
         }
     }
 
-    private func finish(_ outcome: MCPConfirmationOutcome) {
+    private func finish(_ outcome: MCPConfirmationOutcome, generation answered: Int? = nil) {
+        if let answered, answered != generation { return }
+        guard let continuation = pending else { return }
+        pending = nil
         timeoutTask?.cancel()
         timeoutTask = nil
-        panel?.close()
-        panel = nil
-        let continuation = pending
-        pending = nil
-        continuation?.resume(returning: outcome)
-        if continuation != nil {
-            MCPDebugLog.log("create_meeting confirmation: \(outcome)")
-        }
+        presenter.close()
+        continuation.resume(returning: outcome)
+        MCPDebugLog.log("create_meeting confirmation: \(outcome)")
     }
+}
 
-    private func show(_ proposal: MCPMeetingProposal, timeout: TimeInterval) {
+/// The floating panel in the middle of the screen.
+@MainActor
+final class MCPConfirmationPanel: MCPConfirmationPresenting {
+    private var panel: NSPanel?
+
+    func show(_ proposal: MCPMeetingProposal, deadline: Date, onConfirm: @escaping () -> Void, onReject: @escaping () -> Void) {
+        close()
         let localization = LocalizationService()
         let view = MCPMeetingConfirmationView(
             proposal: proposal,
-            deadline: Date().addingTimeInterval(timeout),
+            deadline: deadline,
             localization: localization,
-            onConfirm: { [weak self] in self?.finish(.confirmed) },
-            onReject: { [weak self] in self?.finish(.rejected) }
+            onConfirm: onConfirm,
+            onReject: onReject
         )
         .environment(\.locale, localization.locale)
 
-        let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 400, height: 240),
+        let panel = KeyablePanel(
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 240),
             styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -119,7 +148,7 @@ final class MCPMeetingConfirmationController: MCPMeetingConfirming {
         panel.contentView = hosting
         hosting.layoutSubtreeIfNeeded()
         let fitting = hosting.fittingSize
-        panel.setContentSize(NSSize(width: max(400, fitting.width), height: max(160, fitting.height)))
+        panel.setContentSize(NSSize(width: max(420, fitting.width), height: max(160, fitting.height)))
 
         // Centre of the screen, like the join picker: this one is waiting for a decision.
         if let screen = NotificationScreenPolicy.current.resolve() {
@@ -129,8 +158,20 @@ final class MCPMeetingConfirmationController: MCPMeetingConfirming {
         }
         self.panel = panel
         panel.orderFrontRegardless()
+        // Key without activating the app, so Esc reaches the Cancel button.
         panel.makeKey()
     }
+
+    func close() {
+        panel?.close()
+        panel = nil
+    }
+}
+
+/// A borderless window cannot become key by default, and without that Esc goes to whatever app
+/// was in front instead of the panel's Cancel button.
+private final class KeyablePanel: NSPanel {
+    override var canBecomeKey: Bool { true }
 }
 
 private final class ConfirmationFirstMouseHostingView<Content: View>: NSHostingView<Content> {

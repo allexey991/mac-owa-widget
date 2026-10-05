@@ -11,7 +11,9 @@ final class MCPCalendarToolsTests: XCTestCase {
         private let error: Error?
         private let people: [ResolvedAttendee]
         private let ownEmail: String?
+        private let ownEmailError: Error?
         private(set) var detailCalls: [String] = []
+        private(set) var ownEmailCalls = 0
         private(set) var created: [(title: String, start: Date, required: [String], optional: [String])] = []
 
         init(
@@ -19,20 +21,26 @@ final class MCPCalendarToolsTests: XCTestCase {
             attendeesByID: [String: [EventAttendee]] = [:],
             error: Error? = nil,
             people: [ResolvedAttendee] = [],
-            ownEmail: String? = nil
+            ownEmail: String? = nil,
+            ownEmailError: Error? = nil
         ) {
             self.account = account
             self.attendeesByID = attendeesByID
             self.error = error
             self.people = people
             self.ownEmail = ownEmail
+            self.ownEmailError = ownEmailError
         }
 
         func findPeople(query: String) async throws -> [ResolvedAttendee] {
             people.filter { $0.displayName.localizedCaseInsensitiveContains(query) || $0.email.contains(query.lowercased()) }
         }
 
-        func resolveOrganizerSMTPEmail() async throws -> String? { ownEmail }
+        func resolveOrganizerSMTPEmail() async throws -> String? {
+            ownEmailCalls += 1
+            if let ownEmailError { throw ownEmailError }
+            return ownEmail
+        }
 
         func createMeeting(
             title: String,
@@ -554,6 +562,43 @@ final class MCPCalendarToolsTests: XCTestCase {
         XCTAssertFalse(MCPCalendarTools.isEmailAddress("a@b"))
         XCTAssertFalse(MCPCalendarTools.isEmailAddress("Ivan <a@b.ru>"))
         XCTAssertTrue(MCPCalendarTools.isEmailAddress("ivan.ivanov@corp.ru"))
+    }
+
+    func testUnknownOwnDomainIsSaidAloudAndNotRetriedOnEveryCall() async {
+        let provider = DetailsProvider(
+            account: exchange,
+            people: [partner],
+            ownEmailError: URLError(.timedOut)
+        )
+        let confirmer = FakeConfirmer(.rejected)
+        let (tools, _) = makeTools(events: [], provider: provider, confirmer: confirmer)
+
+        let search = await tools.call(name: "find_people", arguments: ["query": "Partner"]).structured
+        _ = await tools.call(name: "create_meeting", arguments: meetingArguments)
+
+        // Not "internal": unknown.
+        XCTAssertEqual(search?["people"]?.arrayValue?.first?["external"], .null)
+        XCTAssertEqual(confirmer.proposals.first?.externalCheckAvailable, false)
+        let lookups = await provider.ownEmailCalls
+        XCTAssertEqual(lookups, 1)
+    }
+
+    func testFindPeopleBudgetCountsEveryRequestItMayMake() {
+        XCTAssertEqual(MCPCalendarTools.findPeopleRequestCost("Иванов"), 1)
+        XCTAssertEqual(MCPCalendarTools.findPeopleRequestCost("Иван Иванов"), 3)
+        XCTAssertEqual(MCPCalendarTools.findPeopleRequestCost("Иван И"), 1)
+        var bucket = MCPTokenBucket(capacity: 3, perMinute: 3, now: now)
+        XCTAssertFalse(bucket.take(4, now: now))
+        XCTAssertTrue(bucket.take(3, now: now))
+        XCTAssertFalse(bucket.take(now: now))
+    }
+
+    func testConfirmationPanelAlwaysShowsExternalAttendees() {
+        let internalPeople = (0..<12).map { MCPMeetingProposal.Attendee(email: "p\($0)@corp.ru", name: nil, isExternal: false) }
+        let outsider = MCPMeetingProposal.Attendee(email: "x@evil.com", name: nil, isExternal: true)
+        let visible = MCPMeetingConfirmationView.visibleAttendees(internalPeople + [outsider])
+        XCTAssertEqual(visible.count, MCPMeetingConfirmationView.visibleAttendeeLimit)
+        XCTAssertEqual(visible.first, outsider)
     }
 }
 

@@ -115,7 +115,7 @@ enum MCPToolRegistry {
         MCPToolDefinition(
             name: "find_people",
             title: "Find people",
-            description: "Searches the Exchange address book (people in the user's organization) by name, surname or email. Returns name, email, job title and `external` (outside the user's mail domain). Use it to get attendee addresses for create_meeting. Makes a request to Exchange.",
+            description: "Searches the Exchange address book (people in the user's organization) by name, surname or email. Returns name, email, job title and `external` (outside the user's mail domain; null when that domain is unknown). Use it to get attendee addresses for create_meeting. Makes a request to Exchange.",
             inputSchema: [
                 "type": "object",
                 "properties": [

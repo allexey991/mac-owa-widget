@@ -708,10 +708,10 @@ final class CalendarService: ObservableObject {
     }
 
     /// The user's own address in that account (Exchange resolves it from the login once and
-    /// caches it). `nil` when unknown.
-    func ownEmail(accountID: UUID) async -> String? {
+    /// caches it). `nil` when the account has none or the address book does not know it.
+    func ownEmail(accountID: UUID) async throws -> String? {
         guard let provider = providers.first(where: { $0.account.id == accountID }) else { return nil }
-        return try? await provider.resolveOrganizerSMTPEmail()
+        return try await provider.resolveOrganizerSMTPEmail()
     }
 
     func findFreeSlots(

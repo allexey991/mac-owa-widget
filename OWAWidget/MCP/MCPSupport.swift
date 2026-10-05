@@ -116,11 +116,16 @@ struct MCPTokenBucket: Sendable {
     }
 
     mutating func take(now: Date) -> Bool {
+        take(1, now: now)
+    }
+
+    /// All `count` tokens or none.
+    mutating func take(_ count: Int, now: Date) -> Bool {
         let elapsed = max(0, now.timeIntervalSince(updatedAt))
         tokens = min(capacity, tokens + elapsed * refillPerSecond)
         updatedAt = now
-        guard tokens >= 1 else { return false }
-        tokens -= 1
+        guard tokens >= Double(count) else { return false }
+        tokens -= Double(count)
         return true
     }
 }

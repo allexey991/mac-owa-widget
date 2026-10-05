@@ -1217,7 +1217,9 @@ actor OWAClient {
         if let cached = cachedOrganizerSMTPEmail { return cached }
         // Strip domain prefix: "DOMAIN\username" → "username"
         let alias = username.components(separatedBy: "\\").last ?? username
-        let results = (try? await findPeople(query: alias)) ?? []
+        // Errors propagate: callers that can live without the address use `try?`, and the MCP
+        // server reports them to the circuit breaker.
+        let results = try await findPeople(query: alias)
         // Prefer exact alias match in email localpart, fall back to first result
         let match = results.first(where: { $0.email.lowercased().hasPrefix(alias.lowercased()) }) ?? results.first
         cachedOrganizerSMTPEmail = match?.email

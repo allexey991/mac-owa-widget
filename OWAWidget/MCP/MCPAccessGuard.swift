@@ -20,7 +20,7 @@ final class MCPAccessGuard {
         var message: String {
             switch self {
             case .blocked(let reason): reason
-            case .rateLimited: "Too many meeting detail requests in the last minute. Wait a minute and retry, or narrow the period."
+            case .rateLimited: "Too many requests to Exchange in the last minute. Wait a minute and retry, or narrow the request."
             }
         }
     }
@@ -40,12 +40,13 @@ final class MCPAccessGuard {
         self.bucket = MCPTokenBucket(capacity: Self.requestsPerMinute, perMinute: Self.requestsPerMinute, now: clock())
     }
 
-    /// Takes one request from the budget, or says why not.
-    func permitRequest() -> Denial? {
+    /// Takes `count` requests from the budget, or says why not. An operation that may fan out
+    /// into several Exchange requests takes them all up front.
+    func permitRequest(count: Int = 1) -> Denial? {
         if let reason = Self.blockReason(calendarService.syncStatus) {
             return .blocked(reason)
         }
-        return bucket.take(now: clock()) ? nil : .rateLimited
+        return bucket.take(count, now: clock()) ? nil : .rateLimited
     }
 
     func acquireSlot() async {

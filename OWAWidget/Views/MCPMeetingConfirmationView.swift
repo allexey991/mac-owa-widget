@@ -3,7 +3,11 @@ import SwiftUI
 /// What an MCP client wants to create, with "Create" and "Cancel". Shown by
 /// `MCPMeetingConfirmationController`; nothing is sent to Exchange before "Create".
 struct MCPMeetingConfirmationView: View {
+    /// Internal attendees shown per section; external ones are always all shown.
     static let visibleAttendeeLimit = 8
+    /// Longer agendas scroll instead of being cut: whatever the attendees get, the user must be
+    /// able to read before pressing Create.
+    static let inlineAgendaLimit = 300
 
     let proposal: MCPMeetingProposal
     let deadline: Date
@@ -18,13 +22,7 @@ struct MCPMeetingConfirmationView: View {
                 meeting
                 attendees
                 if !proposal.conflicts.isEmpty { conflicts }
-                if !agendaPreview.isEmpty {
-                    Text(agendaPreview)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(3)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                if !agendaText.isEmpty { agenda }
             }
             .padding(14)
 
@@ -47,7 +45,7 @@ struct MCPMeetingConfirmationView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
         }
-        .frame(width: 400, alignment: .leading)
+        .frame(width: 420, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(Color(nsColor: .windowBackgroundColor))
@@ -102,7 +100,12 @@ struct MCPMeetingConfirmationView: View {
             VStack(alignment: .leading, spacing: 4) {
                 attendeeSection(localization.tr("mcp.confirm.required"), proposal.required)
                 attendeeSection(localization.tr("mcp.confirm.optional"), proposal.optional)
-                if proposal.hasExternalAttendees {
+                if !proposal.externalCheckAvailable {
+                    Label(localization.tr("mcp.confirm.externalUnknown"), systemImage: "questionmark.diamond.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if proposal.hasExternalAttendees {
                     Label(localization.tr("mcp.confirm.externalWarning"), systemImage: "exclamationmark.triangle.fill")
                         .font(.system(size: 11))
                         .foregroundStyle(.orange)
@@ -122,7 +125,8 @@ struct MCPMeetingConfirmationView: View {
             Text(title)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
-            ForEach(people.prefix(Self.visibleAttendeeLimit), id: \.email) { person in
+            let visible = Self.visibleAttendees(people)
+            ForEach(visible, id: \.email) { person in
                 HStack(spacing: 6) {
                     if let name = person.name, !name.isEmpty {
                         Text(name).font(.system(size: 12)).lineLimit(1)
@@ -141,8 +145,8 @@ struct MCPMeetingConfirmationView: View {
                     }
                 }
             }
-            if people.count > Self.visibleAttendeeLimit {
-                Text(localization.tr("mcp.confirm.more", people.count - Self.visibleAttendeeLimit))
+            if people.count > visible.count {
+                Text(localization.tr("mcp.confirm.more", people.count - visible.count))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
@@ -172,8 +176,46 @@ struct MCPMeetingConfirmationView: View {
         return "\(day.string(from: proposal.start)), \(Self.hoursText(proposal.start, proposal.end, locale: localization.locale)) · \(localization.minutes(minutes))"
     }
 
-    private var agendaPreview: String {
+    private var agendaText: String {
         proposal.agenda.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    @ViewBuilder
+    private var agenda: some View {
+        let text = agendaText
+        if text.count <= Self.inlineAgendaLimit && text.filter({ $0 == "\n" }).count < 6 {
+            Text(text)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(localization.tr("mcp.confirm.agendaLong", text.count))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                ScrollView {
+                    Text(text)
+                        .font(.system(size: 11))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                        .padding(6)
+                }
+                .frame(height: 150)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color(nsColor: .textBackgroundColor).opacity(0.6))
+                )
+            }
+        }
+    }
+
+    /// External addresses always, then internal ones up to the limit: the address the user most
+    /// needs to see must never hide behind "and N more".
+    static func visibleAttendees(_ people: [MCPMeetingProposal.Attendee]) -> [MCPMeetingProposal.Attendee] {
+        let external = people.filter(\.isExternal)
+        let internalPeople = people.filter { !$0.isExternal }
+        return external + internalPeople.prefix(max(0, visibleAttendeeLimit - external.count))
     }
 
     static func hoursText(_ start: Date, _ end: Date, locale: Locale) -> String {

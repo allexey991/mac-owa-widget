@@ -448,6 +448,8 @@
 "mcp.confirm.externalWarning" = "Some attendees are outside your organization.";
 "mcp.confirm.invitationsNote" = "Invitations go out as soon as you press Create.";
 "mcp.confirm.more" = "and %d more";
+"mcp.confirm.externalUnknown" = "Could not determine your organization's domain, so external addresses are not marked. Check the addresses yourself.";
+"mcp.confirm.agendaLong" = "Full description (%d characters), sent to every attendee";
 "mcp.confirm.conflicts" = "Overlaps your meetings";
 "mcp.privacy.warning" = "Meeting titles, locations and descriptions, and the names and addresses of attendees, will be sent to the AI service you use. Check that your company's policy allows this.";
 "mcp.status" = "Status";

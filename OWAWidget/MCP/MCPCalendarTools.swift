@@ -18,6 +18,12 @@ final class MCPCalendarTools {
     /// Models retry after a timeout, and a duplicate meeting sends a second set of invitations.
     static let duplicateWindow: TimeInterval = 10 * 60
     static let maxAttendees = 100
+    /// How long `create_meeting` waits for the user's own address before showing the panel
+    /// anyway: the panel's 45 seconds and this must fit in the client's 60.
+    static let ownDomainWaitForCreate: TimeInterval = 5
+    static let ownDomainWaitForSearch: TimeInterval = 20
+    /// A failed lookup is not repeated on every call.
+    static let ownDomainRetryInterval: TimeInterval = 10 * 60
 
     private let calendarService: CalendarService
     private let accessGuard: MCPAccessGuard
@@ -31,6 +37,10 @@ final class MCPCalendarTools {
     /// Names seen next to addresses in `find_people` answers, for the confirmation panel.
     private var namesByEmail: [String: String] = [:]
     private var recentCreations: [String: (date: Date, result: [String: JSONValue])] = [:]
+    /// The user's own mail domain per account; `nil` domain is a failed lookup, kept for
+    /// `ownDomainRetryInterval`.
+    private var ownDomains: [UUID: (domain: String?, checkedAt: Date)] = [:]
+    private var ownDomainLookups: [UUID: Task<String?, Never>] = [:]
     private var isCreatingMeeting = false
 
     init(
@@ -490,13 +500,13 @@ final class MCPCalendarTools {
         let limit = try optionalInt(arguments, "limit", range: 1...25) ?? 10
         let account = try exchangeAccount(arguments)
 
-        if let denial = accessGuard.permitRequest() {
+        if let denial = accessGuard.permitRequest(count: Self.findPeopleRequestCost(query)) {
             return .failure(denial.message)
         }
-        await accessGuard.acquireSlot()
-        defer { accessGuard.releaseSlot() }
         let people: [ResolvedAttendee]
         do {
+            await accessGuard.acquireSlot()
+            defer { accessGuard.releaseSlot() }
             people = try await calendarService.findPeople(query: query, accountID: account.id)
         } catch {
             accessGuard.report(error, context: "mcp.findPeople")
@@ -506,7 +516,7 @@ final class MCPCalendarTools {
             return .failure("Address book search failed: \(error.localizedDescription)")
         }
 
-        let ownDomain = await ownMailDomain(account)
+        let ownDomain = await ownMailDomain(account, wait: Self.ownDomainWaitForSearch)
         for person in people where !person.displayName.isEmpty {
             namesByEmail[person.email.lowercased()] = person.displayName
         }
@@ -515,7 +525,8 @@ final class MCPCalendarTools {
             var fields: [String: JSONValue] = [
                 "name": .string(person.displayName),
                 "email": .string(person.email),
-                "external": .bool(Self.isExternal(person.email, ownDomain: ownDomain)),
+                // Unknown rather than a confident `false` when the own domain is unknown.
+                "external": ownDomain == nil ? .null : .bool(Self.isExternal(person.email, ownDomain: ownDomain)),
             ]
             if let title = person.jobTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
                 fields["job_title"] = .string(title)
@@ -576,7 +587,7 @@ final class MCPCalendarTools {
         isCreatingMeeting = true
         defer { isCreatingMeeting = false }
 
-        let ownDomain = await ownMailDomain(account)
+        let ownDomain = await ownMailDomain(account, wait: Self.ownDomainWaitForCreate)
         let attendee = { (email: String) in
             MCPMeetingProposal.Attendee(email: email, name: self.knownName(email), isExternal: Self.isExternal(email, ownDomain: ownDomain))
         }
@@ -595,7 +606,8 @@ final class MCPCalendarTools {
             location: location,
             agenda: agenda,
             conflicts: conflicts.map { .init(title: $0.title, start: $0.startDate, end: $0.endDate) },
-            client: client ?? ""
+            client: client ?? "",
+            externalCheckAvailable: ownDomain != nil
         )
 
         switch await confirmer.confirm(proposal, timeout: confirmationTimeout) {
@@ -669,9 +681,56 @@ final class MCPCalendarTools {
         }
     }
 
-    private func ownMailDomain(_ account: CalendarAccount) async -> String? {
-        guard let email = await calendarService.ownEmail(accountID: account.id) else { return nil }
-        return Self.domain(of: email)
+    /// The user's own mail domain, waiting at most `wait` for a lookup in flight. A lookup that
+    /// outlives the wait keeps running and fills the cache for the next call.
+    private func ownMailDomain(_ account: CalendarAccount, wait: TimeInterval) async -> String? {
+        if let cached = ownDomains[account.id],
+           cached.domain != nil || clock().timeIntervalSince(cached.checkedAt) < Self.ownDomainRetryInterval {
+            return cached.domain
+        }
+        let lookup = ownDomainLookups[account.id] ?? startOwnDomainLookup(account)
+        return await withTaskGroup(of: String??.self) { group in
+            group.addTask { .some(await lookup.value) }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(wait))
+                return .none
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first ?? nil
+        }
+    }
+
+    /// One Exchange request, counted against the budget and reported to the circuit breaker
+    /// like any other MCP request.
+    private func startOwnDomainLookup(_ account: CalendarAccount) -> Task<String?, Never> {
+        let task = Task { @MainActor [weak self] () -> String? in
+            guard let self else { return nil }
+            defer { self.ownDomainLookups[account.id] = nil }
+            if accessGuard.permitRequest() != nil {
+                return nil
+            }
+            await accessGuard.acquireSlot()
+            defer { accessGuard.releaseSlot() }
+            do {
+                let domain = try await calendarService.ownEmail(accountID: account.id).flatMap(Self.domain(of:))
+                ownDomains[account.id] = (domain, clock())
+                return domain
+            } catch {
+                accessGuard.report(error, context: "mcp.ownEmail")
+                ownDomains[account.id] = (nil, clock())
+                return nil
+            }
+        }
+        ownDomainLookups[account.id] = task
+        return task
+    }
+
+    /// `OWAClient.findPeople` searches the whole query and, when that finds nobody, each word
+    /// of two or more letters again.
+    static func findPeopleRequestCost(_ query: String) -> Int {
+        let words = query.split(whereSeparator: \.isWhitespace).filter { $0.count >= 2 }
+        return words.count >= 2 ? 1 + words.count : 1
     }
 
     /// From `find_people`, else from attendee lists already loaded.
