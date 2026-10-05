@@ -1,3 +1,33 @@
+## v1.0.54 - 2026-10-05
+
+### RU
+
+#### Что изменилось
+
+- Приложение подписано Apple Developer ID и нотаризовано Apple. Скачанное приложение открывается двойным кликом, без команд в Терминале. Доступ к Календарю и разрешения связки ключей больше не сбрасываются после обновлений.
+- **Один раз при обновлении на эту версию** macOS спросит доступ к связке ключей: по одному окну на ключ шифрования данных и на каждый аккаунт Exchange. Нажмите **«Всегда разрешать»**: обычное «Разрешить» пускает только на один запуск, и вопрос будет повторяться. Если вы подключали календари macOS, подтвердите и доступ к Календарю. Подпись меняется в последний раз, дальше эти вопросы не появятся.
+- В окне создания встречи ячейка, где Exchange не вернул занятость одного из участников, показывалась свободной и скрывала занятость остальных. Теперь занятость видна, а такие ячейки отмечены нейтральным цветом и не предлагаются как свободное время.
+
+#### Установка
+
+1. Скачайте `.zip`, распакуйте и перенесите `OWAWidget.app` в `/Applications`.
+2. Запустите приложение — дополнительных шагов не нужно.
+3. Все последующие обновления устанавливаются автоматически через кнопку «Установить» внутри приложения.
+
+### EN
+
+#### What's Changed
+
+- The app is now signed with an Apple Developer ID and notarized by Apple. A downloaded copy opens with a double click, no Terminal commands needed. Calendar access and Keychain permissions no longer reset after updates.
+- **Once, when updating to this version,** macOS asks for access to the Keychain: one prompt for the data encryption key and one for each Exchange account. Click **Always Allow**: plain "Allow" lets the app in for one launch only, and the prompt keeps coming back. If you added macOS calendars, confirm Calendar access as well. The signature changes for the last time; these prompts will not appear again.
+- In the new meeting window, a cell where Exchange returned no free/busy data for one attendee was shown as free and hid everyone else's conflicts. Conflicts now show, and such cells get a neutral color and are never offered as free time.
+
+#### Installation
+
+1. Download the `.zip`, unzip it and move `OWAWidget.app` to `/Applications`.
+2. Launch the app — no extra steps needed.
+3. All subsequent updates install automatically via the "Install" button inside the app.
+
 ## v1.0.53 - 2026-09-29
 
 ### RU
