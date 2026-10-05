@@ -139,19 +139,13 @@ Two minutes, once.
 
 1. Download the macOS `.zip` from the [latest release](https://github.com/ilyabazhenov/mac-owa-widget/releases/latest).
 2. Unzip it and move `OWAWidget.app` to `/Applications`.
-3. The app has no Apple Developer ID signature, so macOS may block the first launch. Remove the quarantine flag once:
-
-   ```bash
-   xattr -dr com.apple.quarantine /Applications/OWAWidget.app
-   ```
-
-4. Launch it. The icon appears in the menu bar; there is no Dock icon.
+3. Launch it. The icon appears in the menu bar; there is no Dock icon.
 
    ```bash
    open /Applications/OWAWidget.app
    ```
 
-The quarantine step is for the first install only. After that [Sparkle](https://sparkle-project.org) installs updates with the **Install** button right in the app window: it downloads the update, verifies its signature and relaunches. Automatic checks can be turned off in **Settings › Preferences › Updates**.
+The app is signed with an Apple Developer ID and notarized by Apple, so macOS opens it like any other app. [Sparkle](https://sparkle-project.org) installs updates with the **Install** button right in the app window: it downloads the update, verifies its signature and relaunches. Automatic checks can be turned off in **Settings › Preferences › Updates**.
 
 ## First setup
 
@@ -178,7 +172,7 @@ It's the address you open corporate webmail with in the browser. Ask your IT dep
 Yes. Add a **macOS Calendar** account and the widget shows the calendars your Mac syncs. They are read-only: RSVP, new meetings and Colleagues need Exchange / OWA.
 
 **Why does macOS ask for Calendar access?**
-Only to read Google, iCloud and local calendars. If you use Exchange / OWA alone, you can decline it. macOS may ask again after an app update; just confirm.
+Only to read Google, iCloud and local calendars. If you use Exchange / OWA alone, you can decline it.
 
 **Do I need a VPN?**
 If Exchange is only reachable from the corporate network, yes: the app needs the same server your browser sees. Google and iCloud calendars don't need it.
@@ -186,8 +180,8 @@ If Exchange is only reachable from the corporate network, yes: the app needs the
 **Why is there no Join button for a meeting?**
 The button appears when the online meeting field, location or description contains a call link. Check that the organizer added one.
 
-**Why does macOS block the first launch?**
-The app is distributed without an Apple Developer ID signature, so Gatekeeper quarantines the first downloaded bundle. Remove the flag once with the command from [Installation](#installation).
+**Why does macOS ask for access to the Keychain?**
+The account passwords and the key that encrypts app data live in the Keychain. macOS asks when an app with a different signature reads them, for example the first time after updating from a version released before the app was signed with a Developer ID. Click **Always Allow**: plain **Allow** lets the app in for this launch only, and the question comes back next time.
 
 ## Diagnostics
 

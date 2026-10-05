@@ -301,9 +301,6 @@
           <p><a href="https://github.com/ilyabazhenov/mac-owa-widget/releases/latest">Последний релиз</a> на GitHub, файл <code>.zip</code> для macOS.</p></div></li>
         <li><div><b>Перенесите в «Программы»</b>
           <p>Распакуйте и перетащите <code>OWAWidget.app</code> в <code>/Applications</code>.</p></div></li>
-        <li><div><b>Снимите карантин</b>
-          <p>У приложения нет подписи Apple Developer ID, поэтому при первом запуске macOS может его заблокировать.</p>
-          <div class="cmd"><code>xattr -dr com.apple.quarantine /Applications/OWAWidget.app</code><button type="button" data-copy>Копировать</button></div></div></li>
         <li><div><b>Запустите и добавьте аккаунт</b>
           <p>Иконка появится в строке меню. «Настройки» → «Аккаунты» → «+»: Exchange (OWA) или macOS Calendar.</p>
           <div class="cmd"><code>open /Applications/OWAWidget.app</code><button type="button" data-copy>Копировать</button></div></div></li>
@@ -313,7 +310,7 @@
         <div><dt>Календарь</dt><dd>Exchange 2016, 2019, Online — и/или Google, iCloud через macOS</dd></div>
         <div><dt>Сеть</dt><dd>Доступ к Exchange или VPN; календарям Mac не нужен</dd></div>
       </dl>
-      <p class="aside">Карантин снимается только при первой установке. Дальше обновления ставит Sparkle — кнопкой «Установить» прямо в окне приложения.</p></div>
+      <p class="aside">Подписано Apple Developer ID и нотаризовано Apple: macOS открывает его как любое другое приложение. Обновления ставит Sparkle — кнопкой «Установить» прямо в окне приложения.</p></div>
   </section>
 
   <!-- 19:00 FAQ -->

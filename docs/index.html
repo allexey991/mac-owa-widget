@@ -307,9 +307,6 @@
           <p>The <a href="https://github.com/ilyabazhenov/mac-owa-widget/releases/latest">latest release</a> on GitHub, the macOS <code>.zip</code>.</p></div></li>
         <li><div><b>Move it to Applications</b>
           <p>Unzip and drag <code>OWAWidget.app</code> to <code>/Applications</code>.</p></div></li>
-        <li><div><b>Remove the quarantine flag</b>
-          <p>The app has no Apple Developer ID signature, so macOS may block the first launch.</p>
-          <div class="cmd"><code>xattr -dr com.apple.quarantine /Applications/OWAWidget.app</code><button type="button" data-copy>Copy</button></div></div></li>
         <li><div><b>Launch and add an account</b>
           <p>The icon appears in the menu bar. Settings → Accounts → “+”: Exchange (OWA) or macOS Calendar.</p>
           <div class="cmd"><code>open /Applications/OWAWidget.app</code><button type="button" data-copy>Copy</button></div></div></li>
@@ -319,7 +316,7 @@
         <div><dt>Calendar</dt><dd>Exchange 2016, 2019, Online — and/or Google, iCloud via macOS</dd></div>
         <div><dt>Network</dt><dd>Access to Exchange or a VPN; not needed for Mac calendars</dd></div>
       </dl>
-      <p class="aside">The quarantine step is for the first install only. After that Sparkle installs updates with the Install button right in the app window.</p></div>
+      <p class="aside">Signed with an Apple Developer ID and notarized by Apple: macOS opens it like any other app. Sparkle installs updates with the Install button right in the app window.</p></div>
   </section>
 
   <!-- 19:00 FAQ -->

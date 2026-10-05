@@ -16,23 +16,15 @@ Move `OWAWidget.app` to:
 
 `/Applications/OWAWidget.app`
 
-## 3) Remove quarantine attribute (first install only)
-
-If macOS blocks the app on first launch, run:
-
-```bash
-xattr -dr com.apple.quarantine /Applications/OWAWidget.app
-```
-
-## 4) Launch the app
+## 3) Launch the app
 
 ```bash
 open /Applications/OWAWidget.app
 ```
 
-After launch, OWA Widget will appear in the menu bar.
+After launch, OWA Widget will appear in the menu bar. The app is signed with an Apple Developer ID and notarized by Apple, so macOS opens it without extra steps.
 
-## 5) Future updates (automatic)
+## 4) Future updates (automatic)
 
 OWA Widget uses Sparkle for in-app updates:
 
@@ -76,23 +68,15 @@ If you can see the icon, right-click it → **Copy diagnostics** copies the same
 
 `/Applications/OWAWidget.app`
 
-## 3) Уберите quarantine-атрибут (только при первой установке)
-
-Если macOS блокирует приложение при первом запуске, выполните:
-
-```bash
-xattr -dr com.apple.quarantine /Applications/OWAWidget.app
-```
-
-## 4) Запустите приложение
+## 3) Запустите приложение
 
 ```bash
 open /Applications/OWAWidget.app
 ```
 
-После запуска OWA Widget появится в строке меню.
+После запуска OWA Widget появится в строке меню. Приложение подписано Apple Developer ID и нотаризовано Apple, поэтому macOS открывает его без дополнительных шагов.
 
-## 5) Дальнейшие обновления (автоматически)
+## 4) Дальнейшие обновления (автоматически)
 
 OWA Widget использует Sparkle для in-app обновлений:
 

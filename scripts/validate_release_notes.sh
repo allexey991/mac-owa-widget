@@ -2,7 +2,6 @@
 set -euo pipefail
 
 notes_file="${1:-RELEASE_NOTES.md}"
-required_quarantine_command="xattr -dr com.apple.quarantine /Applications/OWAWidget.app"
 
 if [[ ! -f "$notes_file" ]]; then
   echo "Missing release notes file: $notes_file"
@@ -55,9 +54,12 @@ if ! printf '%s\n' "$latest_block" | rg "^\s*#### Installation$" >/dev/null; the
   exit 1
 fi
 
-quarantine_count="$(printf '%s\n' "$latest_block" | rg -F "$required_quarantine_command" -c)"
-if [[ "$quarantine_count" -lt 2 ]]; then
-  echo "Latest version section must include '$required_quarantine_command' in both RU and EN installation sections."
+# Releases are Developer ID signed and notarized, so Gatekeeper opens a fresh download without
+# help. Sections are usually written by copying the previous one, and every section before the
+# switch tells users to strip the quarantine flag; refuse that stale step instead of shipping it.
+if printf '%s\n' "$latest_block" | rg -q 'xattr|com\.apple\.quarantine'; then
+  echo "Latest version section still tells users to remove the quarantine flag (xattr)."
+  echo "Releases are notarized; drop that step from both installation sections."
   exit 1
 fi
 

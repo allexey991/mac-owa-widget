@@ -34,9 +34,9 @@ OWAWidget - macOS menu bar приложение на Swift 6 и SwiftUI для �
 - `OWAWidget/Providers/GoogleCalendar/` - заглушка будущего Google Calendar провайдера через прямой API (OAuth). Не используется: календари Google приезжают через EventKit.
 - `OWAWidget/Providers/EventKit/` - чтение календарей, которые macOS уже синхронизирует (Google, iCloud, локальные). Провайдер read-only: мутирующие методы `CalendarProvider` остаются `notSupported`.
 
-> **Доступ к календарям требует entitlement.** `Makefile` подписывает с `--options runtime`, а hardened runtime закрывает TCC-ресурсы без явного разрешения - даже вне песочницы. Без `com.apple.security.personal-information.calendars` в `OWAWidget-dev.entitlements` вызов `requestFullAccessToEvents` возвращает `false` за миллисекунды, статус остаётся `notDetermined`, и системный диалог не показывается вообще. Отладка такого молчания легко уходит в ложные версии - проверено на зонде 2026-08-22. `Info.plist` при этом обязан содержать обе строки: `NSCalendarsUsageDescription` (macOS 13) и `NSCalendarsFullAccessUsageDescription` (macOS 14+); отсутствие строки - это крэш в момент запроса, а не отказ.
+> **Доступ к календарям требует entitlement.** `scripts/sign_app.sh` подписывает с `--options runtime`, а hardened runtime закрывает TCC-ресурсы без явного разрешения - даже вне песочницы. Без `com.apple.security.personal-information.calendars` в файле entitlements (их два, ключ нужен в обоих - см. раздел «Xcode») вызов `requestFullAccessToEvents` возвращает `false` за миллисекунды, статус остаётся `notDetermined`, и системный диалог не показывается вообще. Отладка такого молчания легко уходит в ложные версии - проверено на зонде 2026-08-22. `Info.plist` при этом обязан содержать обе строки: `NSCalendarsUsageDescription` (macOS 13) и `NSCalendarsFullAccessUsageDescription` (macOS 14+); отсутствие строки - это крэш в момент запроса, а не отказ.
 >
-> **Выданный доступ не переживает смену подписи.** TCC привязывает разрешение к подписи бандла, а подпись ad-hoc, поэтому статус возвращается в `notDetermined`, а синхронизация EventKit падает с "Calendar access has not been granted yet". Сбрасывает разрешение любое изменение подписанного содержимого - не только новый код: `make bundle` берёт `CFBundleVersion` из `git rev-list --count HEAD`, так что достаточно одного коммита, чтобы `Info.plist` изменился и подпись стала другой. Повторный `make run` без единого изменения, наоборот, доступ сохраняет: подпись ad-hoc детерминирована. У пользователей то же самое случается после каждого обновления через Sparkle. Это не баг в коде - не ищи его там. Приложение справляется само: `EventKitCalendarProvider.fetchEvents` вызывает `ensureReadAccess()`, и при статусе `notDetermined` система показывает диалог на первом же синке после обновления. Достаточно подтвердить его. Запрос не срабатывает у того, кто уже отказал: отказ - это тоже решение, и переспрашивать каждый синк значило бы донимать.
+> **Выданный доступ не переживает смену ad-hoc подписи.** TCC привязывает разрешение к designated requirement бандла. У ad-hoc подписи это `cdhash`, поэтому на локальных сборках статус возвращается в `notDetermined`, а синхронизация EventKit падает с "Calendar access has not been granted yet". Сбрасывает разрешение любое изменение подписанного содержимого - не только новый код: `make bundle` берёт `CFBundleVersion` из `git rev-list --count HEAD`, так что достаточно одного коммита, чтобы `Info.plist` изменился и подпись стала другой. Повторный `make run` без единого изменения, наоборот, доступ сохраняет: подпись ad-hoc детерминирована. Это не баг в коде - не ищи его там. Релизы подписаны Developer ID: requirement у них - bundle id и Team ID, и доступ к Календарю, как и «Всегда разрешать» в связке ключей, переживает обновление через Sparkle (проверено на зонде 2026-10-05). Один раз он слетит у пользователей только при переходе с последнего ad-hoc релиза (v1.0.53) на первый подписанный. Приложение справляется само: `EventKitCalendarProvider.fetchEvents` вызывает `ensureReadAccess()`, и при статусе `notDetermined` система показывает диалог на первом же синке после обновления. Достаточно подтвердить его. Запрос не срабатывает у того, кто уже отказал: отказ - это тоже решение, и переспрашивать каждый синк значило бы донимать.
 
 > **Тесты не должны трогать реальный EventKit.** Причина та же, что у Keychain: `swift test` - обязательный гейт `make release-package`, а диалог доступа к календарям повесит упаковку. Всё, что пересекает границу `EventKitStoring`, - это `Sendable`-снимки (`EventKitSnapshots.swift`), а `EKEventStore` не покидает `SystemEventKitStore`. Инжектируй фейковый стор через `CalendarService(eventKitStore:)` или `EventKitCalendarProvider(account:store:)`.
 - `OWAWidget/Services/MeetingURLDetector.swift` - поиск ссылок на Teams, Zoom, Webex, Google Meet и другие платформы.
@@ -90,7 +90,12 @@ swift build
 
 `.xcodeproj` в проекте нет, и заводить его не нужно. Сборка идёт через SwiftPM и `Makefile` — это единственный поддерживаемый путь: он встраивает `Sparkle.framework`, правит `Info.plist`, копирует локализации и подписывает бандл.
 
-Для работы в Xcode открывай сам пакет: `open Package.swift`. Настройки сборки меняй в `Package.swift` и `Makefile`, entitlements — в `OWAWidget/OWAWidget-dev.entitlements` (только ASCII, см. комментарий в файле).
+Для работы в Xcode открывай сам пакет: `open Package.swift`. Настройки сборки меняй в `Package.swift` и `Makefile`. Подпись живёт в `scripts/sign_app.sh` - его вызывают и `make bundle`, и стенд обновления. Entitlements два файла, общие ключи держи одинаковыми (только ASCII, см. комментарий в файлах):
+
+- `OWAWidget/OWAWidget.entitlements` - сборки с сертификатом (релизы Developer ID, Apple Development). Library validation включена: Sparkle переподписывается тем же Team ID.
+- `OWAWidget/OWAWidget-dev.entitlements` - ad-hoc сборки (`make bundle`, `make run` по умолчанию). Дополнительно `disable-library-validation`: у ad-hoc подписи нет Team ID, и без этого ключа Sparkle не загрузится.
+
+> **`make bundle` перезаписывает `.build/OWAWidget.app` на месте.** Если приложение запущено оттуда, процесс падает с `SIGKILL (Code Signature Invalid)`: бинарь меняется под работающим кодом. Перед `make bundle`, `make release-bundle` и `make release-package` проверь `pgrep -fl ".build/OWAWidget.app/Contents/MacOS/OWAWidget"` и закрой приложение (или предупреди пользователя).
 
 Второй путь сборки означал бы дублирование всего, что делает `Makefile`, и неизбежное расхождение — не добавляй его.
 
@@ -216,6 +221,16 @@ make run
 > менять воркфлоу. Ключ живёт в login Keychain, бэкап — в менеджере паролей
 > (`docs/sparkle-key-backup.md`).
 
+> **Релизы подписываются Developer ID и нотаризуются.** `make release-bundle` подписывает
+> сертификатом `Developer ID Application` из login Keychain (`RELEASE_SIGN_IDENTITY`) и падает
+> на любой другой подписи. `make release-package` до сборки проверяет сертификат и профиль
+> `notarytool`, после сборки отправляет приложение в Apple, пришивает тикет (`stapler`) и требует
+> от Gatekeeper `Notarized Developer ID`. Профиль `owawidget-notary` создаётся один раз на машину
+> командой `xcrun notarytool store-credentials owawidget-notary --key <AuthKey.p8> --key-id <KEYID>
+> --issuer <ISSUER>` (ключ App Store Connect API; его копия - в менеджере паролей). Создаёт его
+> мейнтейнер, не агент. Если нотаризация отклонена, скрипт печатает лог Apple - чини причину,
+> не обходи шаг: без тикета Gatekeeper не откроет скачанное приложение.
+
 > Если в изменениях затронуты подпись, entitlements или состав бандла — до публикации прогони
 > `bash scripts/test_update_locally.sh`. Он проверяет, что уже установленная у пользователей
 > версия сумеет применить обновление; `make release-package` проверяет только подпись артефактов.
@@ -227,7 +242,8 @@ make run
  - `## vX.Y.Z - YYYY-MM-DD`
  - `### RU` и `### EN`
  - В обеих секциях обязательны подразделы про изменения и установку.
- - В обоих языках в инструкции по установке обязательно указывай, что `xattr -dr com.apple.quarantine /Applications/OWAWidget.app` нужен ТОЛЬКО при первой установке; последующие обновления ставит Sparkle автоматически.
+ - Установка: скачать zip, перенести `OWAWidget.app` в `/Applications`, запустить; обновления ставит Sparkle автоматически. Шаг `xattr -dr com.apple.quarantine` больше не нужен (релизы нотаризованы), и валидатор отвергает секцию, где он остался, - не копируй его из старых секций.
+ - Первый релиз с Developer ID (после v1.0.53) - переходный: подпись меняется в последний раз, и пользователи один раз увидят два вопроса связки ключей и запрос доступа к Календарю. В секции этого релиза предупреди об этом и попроси нажать «Всегда разрешать» («Always Allow»): «Разрешить» пускает только на один запуск, и вопрос будет повторяться.
  3. Перед упаковкой обязательно зафиксируй релизные изменения (`VERSION`, `RELEASE_NOTES.md` и связанные файлы) в git commit, чтобы `CFBundleVersion`/`sparkle:version` гарантированно выросли относительно предыдущего релиза (build номер берется из `git rev-list --count HEAD`).
  4. Сборка архива и appcast: `make release-package` (создает `dist/OWAWidget-v<ver>-macos.zip` и `dist/appcast.xml`).
  - **Тесты — обязательный гейт.** `make release-package` зависит от таргета `test` и сам прогоняет `swift test` перед упаковкой. Если сьют красный — упаковка не запускается; сначала почини тесты, релиз не выпускай. Не обходи гейт (не вызывай `scripts/package_release.sh` напрямую) ради «быстрого» релиза.

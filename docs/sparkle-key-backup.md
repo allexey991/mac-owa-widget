@@ -157,8 +157,16 @@ echo probe > /tmp/probe.txt && .build/artifacts/sparkle/Sparkle/bin/sign_update 
 - **`swift package resolve`** — подтянет Sparkle и KeyboardShortcuts по версиям,
   зафиксированным в `Package.resolved`.
 
-Отдельного сертификата подписи не требуется: приложение подписывается ad-hoc
-(`CODE_SIGN_IDENTITY ?= -` в `Makefile`), терять нечего.
+- **Сертификат `Developer ID Application`** в login Keychain — им `make release-bundle`
+  подписывает релиз. Перенести: экспорт из «Связки ключей» в `.p12` вместе с закрытым
+  ключом. Потеря не катастрофа: можно выпустить новый сертификат на developer.apple.com.
+  Designated requirement релиза привязан к Team ID, а не к конкретному сертификату,
+  поэтому доступ к связке ключей и Календарю у пользователей переживёт и смену сертификата.
+- **Профиль нотаризации `owawidget-notary`**:
+  `xcrun notarytool store-credentials owawidget-notary --key AuthKey_<KEYID>.p8 --key-id <KEYID> --issuer <ISSUER>`.
+  Ключ App Store Connect API (`.p8`) Apple отдаёт только один раз — его копия лежит в
+  менеджере паролей. Потерян — отзовите его в App Store Connect (Users and Access →
+  Integrations → Team Keys) и создайте новый.
 
 ## Если ключа нет и бэкапа не осталось
 

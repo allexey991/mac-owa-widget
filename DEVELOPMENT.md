@@ -158,6 +158,13 @@ It serves a locally generated appcast, launches the previously published build a
 
 Releases are built and published **locally only**. There is no CI release workflow: the GitHub runner ships an Xcode version incompatible with the `KeyboardShortcuts` dependency, and keeping a copy of the signing key in GitHub Actions Secrets is an unnecessary exposure.
 
+Releases are signed with a Developer ID and notarized by Apple, so a downloaded copy opens without Gatekeeper warnings, and Calendar and Keychain grants survive updates. `make release-package` needs, once per machine:
+
+- a `Developer ID Application` certificate in the login Keychain;
+- a `notarytool` profile named `owawidget-notary`: `xcrun notarytool store-credentials owawidget-notary --key AuthKey_<KEYID>.p8 --key-id <KEYID> --issuer <ISSUER>`.
+
+It checks both before building, then notarizes and staples the app and refuses to package it unless Gatekeeper reports `Notarized Developer ID`. Local builds (`make bundle`, `make run`) stay ad-hoc signed unless you pass `CODE_SIGN_IDENTITY`.
+
 1. Update `VERSION`.
 2. Update `RELEASE_NOTES.md`.
 3. Run `make release-package`.

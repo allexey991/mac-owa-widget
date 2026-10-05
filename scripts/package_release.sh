@@ -191,7 +191,7 @@ cp "${ARCHIVE_PATH}" "${TMP_APPCAST_DIR}/"
 # Drop a release-notes file next to the archive with a matching base name so
 # generate_appcast embeds it as the item's "What's New" (<description> CDATA).
 # We strip the "#### Установка"/"#### Installation" subsections: those manual
-# quarantine steps are irrelevant to in-app auto-updates and only add noise to
+# install steps are irrelevant to in-app auto-updates and only add noise to
 # the Sparkle popover. The full section (with install steps) still ships to the
 # GitHub Release via NOTES_PATH.
 ARCHIVE_BASENAME="$(basename "${ARCHIVE_PATH}" .zip)"
