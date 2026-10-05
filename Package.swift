@@ -19,6 +19,7 @@ let package = Package(
             dependencies: [
                 .product(name: "Sparkle", package: "Sparkle"),
                 .product(name: "KeyboardShortcuts", package: "KeyboardShortcuts"),
+                "OWAWidgetMCPShared",
             ],
             path: "OWAWidget",
             // Exclude non-Swift files so SPM doesn't try to bundle them
@@ -38,9 +39,22 @@ let package = Package(
                 .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])
             ]
         ),
+        // Code shared by the app and the MCP bridge: the socket path formula and the bridge's
+        // bookkeeping. Kept dependency-free so the bridge stays a tiny binary.
+        .target(
+            name: "OWAWidgetMCPShared",
+            path: "OWAWidgetMCPShared"
+        ),
+        // stdio <-> Unix socket bridge that MCP clients launch. The Makefile copies it into
+        // Contents/Helpers/owawidget-mcp; it never touches the Keychain or the network.
+        .executableTarget(
+            name: "OWAWidgetMCPBridge",
+            dependencies: ["OWAWidgetMCPShared"],
+            path: "OWAWidgetMCPBridge"
+        ),
         .testTarget(
             name: "OWAWidgetTests",
-            dependencies: ["OWAWidget"],
+            dependencies: ["OWAWidget", "OWAWidgetMCPShared"],
             path: "Tests/OWAWidgetTests"
         )
     ]

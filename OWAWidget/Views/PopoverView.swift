@@ -714,35 +714,7 @@ struct PopoverView: View {
 
     /// Meetings starting within 5 minutes of the earliest upcoming, sorted: with URL first
     private var nextEvents: [CalendarEvent] {
-        NextEventsPolicy.nextEvents(from: service.events, now: now)
-    }
-
-    enum NextEventsPolicy {
-        static func nextEvents(from events: [CalendarEvent], now: Date) -> [CalendarEvent] {
-            let upcoming = events
-                .filter {
-                    !$0.isAllDay &&
-                        !$0.isEffectivelyCancelled &&
-                        ($0.startDate > now || $0.isHappeningNow)
-                }
-                .sorted { $0.startDate < $1.startDate }
-
-            guard let earliest = upcoming.first else { return [] }
-
-            // Only surface the banner for meetings starting within 30 minutes
-            let secondsUntilEarliestStart = earliest.startDate.timeIntervalSince(now)
-            guard secondsUntilEarliestStart <= 30 * 60 || earliest.isHappeningNow else { return [] }
-
-            let promoted = upcoming.first {
-                !$0.isHappeningNow && $0.startDate.timeIntervalSince(now) <= 5 * 60
-            }
-            let reference = promoted ?? earliest
-
-            let group = upcoming.filter {
-                abs($0.startDate.timeIntervalSince(reference.startDate)) <= 300
-            }
-            return group.sorted { ($0.joinURL != nil ? 0 : 1) < ($1.joinURL != nil ? 0 : 1) }
-        }
+        NextMeetingGroupPolicy.bannerGroup(from: service.events, now: now)
     }
 
     // MARK: - Search

@@ -19,6 +19,9 @@ DIST_DIR := dist
 WATCH_DEBOUNCE ?= 2
 
 # Sparkle artifacts produced by `swift package resolve` for the SPM binaryTarget.
+MCP_BRIDGE_PRODUCT := OWAWidgetMCPBridge
+MCP_BRIDGE_NAME    := owawidget-mcp
+
 SPARKLE_ARTIFACTS_DIR := .build/artifacts/sparkle/Sparkle
 SPARKLE_FRAMEWORK     := $(SPARKLE_ARTIFACTS_DIR)/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework
 
@@ -71,6 +74,10 @@ bundle: build
 	fi
 	@rm -rf "$(APP_PATH)/Contents/Frameworks/Sparkle.framework"
 	@ditto "$(SPARKLE_FRAMEWORK)" "$(APP_PATH)/Contents/Frameworks/Sparkle.framework"
+	@# MCP bridge: the stdio binary MCP clients launch. It only relays to the app's Unix
+	@# socket; scripts/sign_app.sh signs it without entitlements (no network, no TCC).
+	@mkdir -p "$(APP_PATH)/Contents/Helpers"
+	@cp "$$(swift build $(SWIFT_BUILD_ARGS) --show-bin-path)/$(MCP_BRIDGE_PRODUCT)" "$(APP_PATH)/Contents/Helpers/$(MCP_BRIDGE_NAME)"
 	@# Signing (identity, entitlements, nested Sparkle helpers) lives in one script
 	@# shared with scripts/test_update_locally.sh; see the rationale there.
 	bash scripts/sign_app.sh "$(APP_PATH)" "$(CODE_SIGN_IDENTITY)"
@@ -85,6 +92,10 @@ release-bundle:
 	  (echo "Release binary missing x86_64 (Intel). Check SWIFT_BUILD_ARGS." >&2 && exit 1)
 	@lipo -info "$(APP_PATH)/Contents/MacOS/$(APP_NAME)" | grep -q 'arm64' || \
 	  (echo "Release binary missing arm64 (Apple Silicon). Check SWIFT_BUILD_ARGS." >&2 && exit 1)
+	@lipo -info "$(APP_PATH)/Contents/Helpers/$(MCP_BRIDGE_NAME)" | grep -q 'x86_64' || \
+	  (echo "MCP bridge missing x86_64 (Intel). Check SWIFT_BUILD_ARGS." >&2 && exit 1)
+	@lipo -info "$(APP_PATH)/Contents/Helpers/$(MCP_BRIDGE_NAME)" | grep -q 'arm64' || \
+	  (echo "MCP bridge missing arm64 (Apple Silicon). Check SWIFT_BUILD_ARGS." >&2 && exit 1)
 	@echo "✓ Universal binary: $$(lipo -info "$(APP_PATH)/Contents/MacOS/$(APP_NAME)" | sed 's/.*: //')"
 
 ## Build .app and package release zip + appcast.xml.

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# Sign OWAWidget.app inside-out: Sparkle's nested helpers, Sparkle.framework, then the app.
+# Sign OWAWidget.app inside-out: Sparkle's nested helpers, Sparkle.framework, the MCP bridge in
+# Contents/Helpers, then the app.
 # Single place for signing, shared by `make bundle` and scripts/test_update_locally.sh, so the
 # update test exercises exactly the signature users get.
 #
@@ -54,6 +55,12 @@ if [[ -d "${FRAMEWORK}" ]]; then
   sign "${FRAMEWORK}/Versions/B/Updater.app"
   sign "${FRAMEWORK}"
 fi
+
+# Helper tools (the MCP bridge) carry no entitlements: the bridge only relays to the app's Unix
+# socket and needs neither the network nor any TCC resource.
+for helper in "${APP}"/Contents/Helpers/*; do
+  [[ -f "${helper}" ]] && sign "${helper}"
+done
 
 sign --entitlements "${ENTITLEMENTS}" "${APP}"
 codesign --verify --strict --deep "${APP}"

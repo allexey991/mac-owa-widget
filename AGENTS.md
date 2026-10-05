@@ -66,6 +66,17 @@ OWAWidget - macOS menu bar приложение на Swift 6 и SwiftUI для �
 - `OWAWidget/Services/WatchedColleaguesStore.swift` - список коллег и ссылки на их комнаты, через `SecureStore` (имена, адреса и должности из адресной книги).
 - `OWAWidget/Services/AppearanceService.swift` - тема приложения (light/dark/system).
 - `OWAWidget/Services/RecentAttendeesStore.swift` / `RecentLocationsStore.swift` - история участников и локаций для быстрого ввода в форме создания встречи.
+- `OWAWidget/MCP/` - MCP-сервер для AI-ассистентов (дизайн: `docs/superpowers/specs/2026-10-05-mcp-server-design.md`). Шесть инструментов **только для чтения** и только в окне синка (−7 … +30 дней): `get_status`, `get_current_and_next`, `list_events`, `get_schedule_stats`, `find_events_with_person`, `get_event_details`. Функция за настройкой `mcpServerEnabled`, по умолчанию выключена; вкладка «AI (MCP)» в настройках - `Views/MCPSettingsView.swift`.
+
+> **Сервер живёт в приложении, клиент приходит через мост.** MCP-клиент запускает `Contents/Helpers/owawidget-mcp` (таргет `OWAWidgetMCPBridge`), тот перекладывает строки JSON-RPC между stdio и Unix-сокетом приложения. Отдельный самостоятельный сервер не делай: новый бинарь в связке - это диалог Keychain после каждого обновления, а второй процесс с теми же учётными данными обходит circuit breaker и рискует заблокировать доменную учётку. Мост не ходит ни в связку, ни в сеть, подписан **без entitlements** (`scripts/sign_app.sh`) и запускает приложение только через `NSWorkspace`, никогда exec'ом: иначе запросы TCC и связки приписались бы клиенту. Мост ничего не делает до первого сообщения в stdin - некоторые клиенты запускают сервер дважды (одноразовая проба версии).
+>
+> **Сокет - `~/Library/Caches/owawidget/mcp-<8 hex от bundle id>.sock`, не `$TMPDIR`.** `dirhelper` ночью удаляет из `$TMPDIR` файлы, к которым не обращались три дня, а у `sun_path` лимит 103 байта. Формула пути общая для приложения и моста (`OWAWidgetMCPShared/MCPSocketPath.swift`); сторож в `MCPServerService` раз в минуту пересоздаёт пропавший файл.
+>
+> **Протокол - своя реализация двух эпох** (`MCPProtocolHandler`): legacy с `initialize` (`2025-06-18`, `2025-11-25`) и stateless `2026-07-28` (`server/discover`, версия в `_meta` каждого запроса). Официальный Swift SDK умеет только `2025-11-25` и тянет `swift-nio`. `structuredContent` всегда объект; `outputSchema` не объявляем, описание полей - в тексте инструмента.
+>
+> **Сеть в MCP - только `GetCalendarEvent`** (детали встречи) и только через `MCPAccessGuard`: при `syncStatus.blocksSync` запрос не делается, ошибки уходят в общий circuit breaker (`CalendarService.reportExternalRequestFailure`), бюджет 60 запросов в минуту и не больше 2 одновременно. Не добавляй сетевые вызовы в MCP в обход guard'а. Кэш деталей (`MCPEventDetailsCache`) - только в памяти, по ключу (`id`, `changeKey`).
+>
+> **Добавляя мутирующие инструменты** (RSVP, создание встречи), обязательно: подтверждение в окне приложения не дольше 45 секунд (TypeScript SDK отменяет запрос через 60), отзыв подтверждения по `notifications/cancelled`, защита `create_meeting` от дублей, подсветка внешних адресов. Причины - в дизайн-документе, раздел «Вне плана».
 
 ## Сборка и запуск
 

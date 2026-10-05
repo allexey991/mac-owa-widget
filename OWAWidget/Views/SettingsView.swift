@@ -19,11 +19,16 @@ struct SettingsView: View {
                 .tabItem { Label(localization.tr("settings.tab.preferences"), systemImage: "slider.horizontal.3") }
                 .onAppear { DiagnosticLog.event("SettingsView preferences tab appeared") }
 
+            MCPSettingsView()
+                .tabItem { Label(localization.tr("settings.tab.mcp"), systemImage: "sparkles") }
+                .onAppear { DiagnosticLog.event("SettingsView mcp tab appeared") }
+
             AboutView()
                 .tabItem { Label(localization.tr("settings.tab.about"), systemImage: "info.circle") }
                 .onAppear { DiagnosticLog.event("SettingsView about tab appeared") }
         }
-        .frame(width: 480)
+        // Four tabs: at 480 pt macOS folds the whole tab bar into a ">>" overflow menu.
+        .frame(width: 600)
         .onAppear { DiagnosticLog.event("SettingsView TabView appeared") }
         .sheet(item: $vm.editingAccount) { _ in
             accountSheet

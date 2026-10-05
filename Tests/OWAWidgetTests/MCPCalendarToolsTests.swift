@@ -1,0 +1,393 @@
+import XCTest
+@testable import OWAWidget
+
+/// The MCP tools over a real `CalendarService` with fake providers: no Keychain, no EventKit,
+/// no network. Time is fixed at Monday 2026-10-05 12:00 Moscow.
+@MainActor
+final class MCPCalendarToolsTests: XCTestCase {
+    private actor DetailsProvider: CalendarProvider {
+        nonisolated let account: CalendarAccount
+        private let attendeesByID: [String: [EventAttendee]]
+        private let error: Error?
+        private(set) var detailCalls: [String] = []
+
+        init(account: CalendarAccount, attendeesByID: [String: [EventAttendee]] = [:], error: Error? = nil) {
+            self.account = account
+            self.attendeesByID = attendeesByID
+            self.error = error
+        }
+
+        func fetchEvents(from start: Date, to end: Date) async throws -> [CalendarEvent] { [] }
+        func validateCredentials() async throws {}
+
+        func fetchDetails(for event: CalendarEvent) async throws -> CalendarEventDetails {
+            detailCalls.append(event.id)
+            if let error { throw error }
+            return CalendarEventDetails(attendees: attendeesByID[event.id] ?? [], body: "Agenda of \(event.id)")
+        }
+    }
+
+    private let zone = TimeZone(identifier: "Europe/Moscow")!
+    private let exchange = CalendarAccount(displayName: "Work", serverURL: "", email: "", accountType: .owa)
+    private let local = CalendarAccount(displayName: "iCloud", serverURL: "", email: "", accountType: .eventKit)
+
+    private func date(_ day: Int, _ hour: Int, _ minute: Int = 0) -> Date {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = zone
+        return calendar.date(from: DateComponents(year: 2026, month: 10, day: day, hour: hour, minute: minute))!
+    }
+
+    private var now: Date { date(5, 12) }
+
+    private func event(
+        _ id: String,
+        day: Int,
+        hour: Int,
+        minutes: Int = 60,
+        account: CalendarAccount? = nil,
+        response: MeetingResponseType = .accepted,
+        organizer: String? = nil,
+        attendees: [EventAttendee]? = nil,
+        joinURL: URL? = nil
+    ) -> CalendarEvent {
+        let start = date(day, hour)
+        return CalendarEvent(
+            id: id, title: id, startDate: start, endDate: start.addingTimeInterval(TimeInterval(minutes * 60)),
+            location: nil, bodyPreview: "preview \(id)", joinURL: joinURL, platform: joinURL == nil ? .generic : .teams,
+            isAllDay: false, organizer: organizer, accountID: (account ?? exchange).id, responseType: response,
+            changeKey: "ck-\(id)", detailedAttendees: attendees
+        )
+    }
+
+    private func makeTools(
+        events: [CalendarEvent],
+        provider: DetailsProvider? = nil,
+        enabled: Bool = true
+    ) -> (MCPCalendarTools, CalendarService) {
+        let providers: [any CalendarProvider] = [provider ?? DetailsProvider(account: exchange), DetailsProvider(account: local)]
+        let service = CalendarService(
+            providers: providers,
+            notificationService: SilentNotificationService(),
+            customMeetingReminders: SilentMeetingReminderController(),
+            loadPersistedAccounts: false,
+            startBackgroundTasks: false,
+            clock: { [now] in now }
+        )
+        service.replaceEventsForTests(events)
+        // The real sync window: start of day -7 days ... now +30 days.
+        service.setEventCoverageForTests(EventCoverage(
+            start: date(5, 0).addingTimeInterval(-7 * 86400),
+            end: now.addingTimeInterval(30 * 86400),
+            refreshedAt: date(5, 11, 55)
+        ))
+        let tools = MCPCalendarTools(
+            calendarService: service,
+            clock: { [now] in now },
+            timeZone: { [zone] in zone },
+            isEnabled: { enabled }
+        )
+        return (tools, service)
+    }
+
+    private func ids(_ value: JSONValue?) -> [String] {
+        value?.arrayValue?.compactMap { $0["title"]?.stringValue } ?? []
+    }
+
+    // MARK: - Common
+
+    func testDisabledServerReturnsNoData() async {
+        let (tools, _) = makeTools(events: [event("a", day: 5, hour: 14)], enabled: false)
+        let result = await tools.call(name: "list_events", arguments: [:])
+        XCTAssertTrue(result.isError)
+        XCTAssertTrue(result.errorMessage?.contains("Settings") == true)
+    }
+
+    func testEveryAnswerSaysHowFreshTheDataIs() async {
+        let (tools, _) = makeTools(events: [])
+        let status = await tools.call(name: "get_status", arguments: [:]).structured
+        XCTAssertEqual(status?["now"], "2026-10-05T12:00:00+03:00")
+        XCTAssertEqual(status?["timezone"], "Europe/Moscow")
+        XCTAssertEqual(status?["data_as_of"], "2026-10-05T11:55:00+03:00")
+        XCTAssertNotNil(status?["coverage"]?["from"])
+        XCTAssertEqual(status?["sync_state"], "idle")
+    }
+
+    // MARK: - list_events
+
+    func testListEventsDefaultsToTodayAndHidesDeclined() async {
+        let (tools, _) = makeTools(events: [
+            event("today", day: 5, hour: 14),
+            event("declined", day: 5, hour: 15, response: .declined),
+            event("tomorrow", day: 6, hour: 10),
+        ])
+        let result = await tools.call(name: "list_events", arguments: [:]).structured
+        XCTAssertEqual(ids(result?["events"]), ["today"])
+        XCTAssertEqual(result?["truncated"], false)
+        let first = result?["events"]?.arrayValue?.first
+        XCTAssertEqual(first?["event_id"]?.stringValue?.count, 12)
+        XCTAssertNil(first?["join_url"], "join links only come from get_event_details")
+    }
+
+    func testListEventsFiltersAndLimits() async {
+        let (tools, _) = makeTools(events: [
+            event("Sprint review", day: 6, hour: 10),
+            event("Retro", day: 6, hour: 11, response: .declined),
+            event("Planning", day: 7, hour: 10),
+        ])
+        let declined = await tools.call(name: "list_events", arguments: ["from": "2026-10-06", "to": "2026-10-07", "response": ["declined"]]).structured
+        XCTAssertEqual(ids(declined?["events"]), ["Retro"])
+
+        let query = await tools.call(name: "list_events", arguments: ["from": "2026-10-06", "to": "2026-10-07", "query": "sprint"]).structured
+        XCTAssertEqual(ids(query?["events"]), ["Sprint review"])
+
+        let limited = await tools.call(name: "list_events", arguments: ["from": "2026-10-06", "to": "2026-10-07", "limit": 1]).structured
+        XCTAssertEqual(limited?["truncated"], true)
+        XCTAssertEqual(limited?["total"], 2)
+    }
+
+    func testListEventsClipsToCoverageAndRejectsPeriodsOutsideIt() async {
+        let (tools, _) = makeTools(events: [event("a", day: 5, hour: 14)])
+        let clipped = await tools.call(name: "list_events", arguments: ["from": "2026-09-01", "to": "2026-10-06"]).structured
+        XCTAssertEqual(clipped?["range"]?["clipped_to_coverage"], true)
+        XCTAssertEqual(ids(clipped?["events"]), ["a"])
+
+        let outside = await tools.call(name: "list_events", arguments: ["from": "2026-08-01", "to": "2026-08-31"])
+        XCTAssertTrue(outside.isError)
+        XCTAssertTrue(outside.errorMessage?.contains("only holds meetings") == true)
+    }
+
+    func testOnlyToMeansThePeriodEndingThere() async {
+        let (tools, _) = makeTools(events: [event("sat", day: 3, hour: 10), event("fri", day: 2, hour: 10)])
+        let day = await tools.call(name: "list_events", arguments: ["to": "2026-10-03"]).structured
+        XCTAssertEqual(day?["range"]?["from"], "2026-10-03T00:00:00+03:00")
+        XCTAssertEqual(ids(day?["events"]), ["sat"])
+
+        let week = await tools.call(name: "get_schedule_stats", arguments: ["to": "2026-10-04"]).structured
+        XCTAssertEqual(week?["range"]?["from"], "2026-09-28T00:00:00+03:00")
+        XCTAssertEqual(week?["range"]?["to"], "2026-10-05T00:00:00+03:00")
+    }
+
+    func testInvalidArgumentsAreToolErrors() async {
+        let (tools, _) = makeTools(events: [])
+        let badDate = await tools.call(name: "list_events", arguments: ["from": "tomorrow"])
+        XCTAssertTrue(badDate.isError)
+        let badLimit = await tools.call(name: "list_events", arguments: ["limit": 1000])
+        XCTAssertTrue(badLimit.isError)
+    }
+
+    // MARK: - get_current_and_next
+
+    func testCurrentAndNextIgnoresDeclined() async {
+        let (tools, _) = makeTools(events: [
+            event("running", day: 5, hour: 11, minutes: 90),
+            event("declined-next", day: 5, hour: 13, response: .declined),
+            event("next", day: 5, hour: 14),
+        ])
+        let result = await tools.call(name: "get_current_and_next", arguments: [:]).structured
+        XCTAssertEqual(ids(result?["current"]), ["running"])
+        XCTAssertEqual(ids(result?["next"]), ["next"])
+        XCTAssertEqual(result?["free_until"], .null)
+        XCTAssertEqual(result?["minutes_until_next"], 120)
+    }
+
+    // MARK: - get_schedule_stats
+
+    func testScheduleStatsDefaultsToCurrentWeek() async {
+        let (tools, _) = makeTools(events: [
+            event("mon", day: 5, hour: 10),
+            event("tue", day: 6, hour: 10),
+            event("next-week", day: 12, hour: 10),
+        ])
+        let result = await tools.call(name: "get_schedule_stats", arguments: [:]).structured
+        XCTAssertEqual(result?["range"]?["from"], "2026-10-05T00:00:00+03:00")
+        XCTAssertEqual(result?["range"]?["to"], "2026-10-12T00:00:00+03:00")
+        XCTAssertEqual(result?["totals"]?["meeting_count"], 2)
+        XCTAssertEqual(result?["totals"]?["meeting_minutes"], 120)
+        XCTAssertEqual(result?["days"]?.arrayValue?.count, 7)
+    }
+
+    func testScheduleStatsValidatesWorkingHours() async {
+        let (tools, _) = makeTools(events: [])
+        let result = await tools.call(name: "get_schedule_stats", arguments: ["work_start": "18:00", "work_end": "09:00"])
+        XCTAssertTrue(result.isError)
+    }
+
+    // MARK: - find_events_with_person
+
+    func testFindsNearestPastMeetingWithFewRequests() async {
+        let ivanov = EventAttendee(name: "Иванов Иван", email: "ivanov@corp.ru", kind: .required, response: .accepted)
+        let provider = DetailsProvider(account: exchange, attendeesByID: ["mon-9": [ivanov], "fri": [ivanov]])
+        let (tools, _) = makeTools(events: [
+            event("fri", day: 2, hour: 10),
+            event("mon-9", day: 5, hour: 9),
+            event("mon-10", day: 5, hour: 10),
+            event("mon-11", day: 5, hour: 11),
+        ], provider: provider)
+
+        let result = await tools.call(name: "find_events_with_person", arguments: ["person": "Иван Иванов", "direction": "past", "limit": 1]).structured
+        XCTAssertEqual(ids(result?["past"]), ["mon-9"])
+        XCTAssertEqual(result?["past"]?.arrayValue?.first?["match"], "required")
+        XCTAssertEqual(result?["partial"], false)
+        // Nearest first, stopping at the first hit: mon-11, mon-10, mon-9 — never fri.
+        let calls = await provider.detailCalls
+        XCTAssertEqual(calls, ["mon-11", "mon-10", "mon-9"])
+    }
+
+    func testOrganizerAndLocalAttendeesNeedNoRequests() async {
+        let provider = DetailsProvider(account: exchange)
+        let petrov = EventAttendee(name: "Petrov Petr", email: "petrov@corp.ru", kind: .optional, response: .tentative)
+        let (tools, _) = makeTools(events: [
+            event("organized", day: 6, hour: 10, organizer: "Петров Пётр"),
+            event("icloud", day: 7, hour: 10, account: local, attendees: [petrov]),
+        ], provider: provider)
+
+        let result = await tools.call(name: "find_events_with_person", arguments: ["person": "Петров", "direction": "upcoming"]).structured
+        XCTAssertEqual(ids(result?["upcoming"]), ["organized", "icloud"])
+        XCTAssertEqual(result?["upcoming"]?.arrayValue?.map { $0["match"] }, ["organizer", "optional"])
+        let calls = await provider.detailCalls
+        XCTAssertTrue(calls.isEmpty)
+    }
+
+    func testRequestBudgetMakesTheAnswerPartialAndASecondCallContinues() async {
+        let provider = DetailsProvider(account: exchange)
+        var events: [CalendarEvent] = []
+        for index in 0..<45 {
+            events.append(event("m\(index)", day: 6 + index / 8, hour: 9 + index % 8))
+        }
+        let (tools, _) = makeTools(events: events, provider: provider)
+
+        let first = await tools.call(name: "find_events_with_person", arguments: ["person": "nobody@corp.ru", "direction": "upcoming"]).structured
+        XCTAssertEqual(first?["partial"], true)
+        XCTAssertEqual(first?["unchecked_count"], 5)
+        XCTAssertEqual(first?["detail_requests_made"], 40)
+
+        let second = await tools.call(name: "find_events_with_person", arguments: ["person": "nobody@corp.ru", "direction": "upcoming"]).structured
+        XCTAssertEqual(second?["partial"], false)
+        XCTAssertEqual(second?["detail_requests_made"], 5)
+        let calls = await provider.detailCalls
+        XCTAssertEqual(calls.count, 45)
+    }
+
+    func testAmbiguousNamesAreReported() async {
+        let a = EventAttendee(name: "Иванов Иван", email: "ivan@corp.ru", kind: .required, response: .accepted)
+        let b = EventAttendee(name: "Иванов Пётр", email: "petr.ivanov@corp.ru", kind: .required, response: .accepted)
+        let (tools, _) = makeTools(events: [
+            event("one", day: 6, hour: 10, account: local, attendees: [a]),
+            event("two", day: 6, hour: 11, account: local, attendees: [b]),
+        ])
+        let result = await tools.call(name: "find_events_with_person", arguments: ["person": "Иванов"]).structured
+        XCTAssertEqual(result?["ambiguous_people"]?.arrayValue?.count, 2)
+    }
+
+    func testBlockedSyncMakesNoRequests() async {
+        let provider = DetailsProvider(account: exchange)
+        let (tools, service) = makeTools(events: [event("a", day: 6, hour: 10)], provider: provider)
+        service.debugForceAuthBlock()
+
+        let result = await tools.call(name: "find_events_with_person", arguments: ["person": "Иванов"]).structured
+        XCTAssertEqual(result?["partial"], true)
+        XCTAssertNotNil(result?["blocked_reason"])
+        let calls = await provider.detailCalls
+        XCTAssertTrue(calls.isEmpty)
+    }
+
+    func testAuthFailureLatchesTheCircuitBreaker() async {
+        let provider = DetailsProvider(account: exchange, error: OWAError.authenticationFailed("rejected"))
+        let (tools, service) = makeTools(events: [event("a", day: 6, hour: 10), event("b", day: 6, hour: 11)], provider: provider)
+
+        let result = await tools.call(name: "find_events_with_person", arguments: ["person": "Иванов", "direction": "upcoming"]).structured
+
+        XCTAssertTrue(service.syncStatus.isAuthenticationRequired)
+        XCTAssertNotNil(result?["blocked_reason"])
+        // The first rejection stops the walk: no second credential submission.
+        let calls = await provider.detailCalls
+        XCTAssertEqual(calls, ["a"])
+    }
+
+    // MARK: - get_event_details
+
+    func testEventDetailsLoadOnceThenComeFromCache() async throws {
+        let attendee = EventAttendee(name: "Иванов Иван", email: "ivanov@corp.ru", kind: .required, response: .tentative)
+        let provider = DetailsProvider(account: exchange, attendeesByID: ["a": [attendee]])
+        let meeting = event("a", day: 6, hour: 10, joinURL: URL(string: "https://teams.microsoft.com/l/meetup-join/x"))
+        let (tools, service) = makeTools(events: [meeting], provider: provider)
+        let handle = MCPEventID.short("a")
+
+        let first = await tools.call(name: "get_event_details", arguments: ["event_id": .string(handle)]).structured
+        XCTAssertEqual(first?["details_source"], "network")
+        XCTAssertEqual(first?["attendees"]?.arrayValue?.first?["response"], "tentative")
+        XCTAssertEqual(first?["body"], "Agenda of a")
+        XCTAssertEqual(first?["join_url"], "https://teams.microsoft.com/l/meetup-join/x")
+
+        // A sync replaces the event and drops its details; the MCP cache still has them.
+        service.replaceEventsForTests([meeting])
+        let second = await tools.call(name: "get_event_details", arguments: ["event_id": .string(handle)]).structured
+        XCTAssertEqual(second?["details_source"], "cache")
+        let calls = await provider.detailCalls
+        XCTAssertEqual(calls.count, 1)
+    }
+
+    func testUnknownEventID() async {
+        let (tools, _) = makeTools(events: [])
+        let result = await tools.call(name: "get_event_details", arguments: ["event_id": "0123456789ab"])
+        XCTAssertTrue(result.isError)
+    }
+}
+
+/// `data_as_of` must not claim a fresh calendar when part of it failed to sync.
+@MainActor
+final class CalendarServiceCoverageTests: XCTestCase {
+    private actor Provider: CalendarProvider {
+        nonisolated let account: CalendarAccount
+        private let error: Error?
+
+        init(account: CalendarAccount, error: Error? = nil) {
+            self.account = account
+            self.error = error
+        }
+
+        func fetchEvents(from start: Date, to end: Date) async throws -> [CalendarEvent] {
+            if let error { throw error }
+            let startDate = Date().addingTimeInterval(3600)
+            return [CalendarEvent(
+                id: "\(account.id)", title: "x", startDate: startDate, endDate: startDate.addingTimeInterval(1800),
+                location: nil, bodyPreview: nil, joinURL: nil, platform: .generic, isAllDay: false,
+                organizer: nil, accountID: account.id
+            )]
+        }
+
+        func validateCredentials() async throws {}
+    }
+
+    private func makeService(_ providers: [any CalendarProvider]) -> CalendarService {
+        CalendarService(
+            providers: providers,
+            notificationService: SilentNotificationService(),
+            customMeetingReminders: SilentMeetingReminderController(),
+            loadPersistedAccounts: false,
+            startBackgroundTasks: false
+        )
+    }
+
+    func testFullSuccessRefreshesCoverage() async {
+        let service = makeService([Provider(account: CalendarAccount(displayName: "W", serverURL: "", email: "", accountType: .owa))])
+        await service.performSyncForTests()
+        XCTAssertNotNil(service.eventCoverage)
+        XCTAssertLessThan(abs(service.eventCoverage!.refreshedAt.timeIntervalSinceNow), 5)
+    }
+
+    func testFailedProviderKeepsTheOldTimestamp() async {
+        let old = EventCoverage(start: Date().addingTimeInterval(-86400 * 7), end: Date().addingTimeInterval(86400 * 30),
+                                refreshedAt: Date().addingTimeInterval(-86400 * 3))
+        let service = makeService([
+            Provider(account: CalendarAccount(displayName: "W", serverURL: "", email: "", accountType: .owa), error: URLError(.notConnectedToInternet)),
+            Provider(account: CalendarAccount(displayName: "L", serverURL: "", email: "", accountType: .eventKit)),
+        ])
+        service.setEventCoverageForTests(old)
+
+        await service.performSyncForTests()
+
+        XCTAssertEqual(service.eventCoverage, old)
+        XCTAssertTrue(service.syncStatus.isOfflineCached)
+    }
+}

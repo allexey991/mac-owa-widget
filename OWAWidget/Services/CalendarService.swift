@@ -28,6 +28,10 @@ protocol CustomMeetingReminderControlling: AnyObject {
 @MainActor
 final class CalendarService: ObservableObject {
     @Published private(set) var events: [CalendarEvent] = []
+    /// Period `events` was last fetched for and when. `nil` until a sync or the disk cache
+    /// provides one. Read by the MCP server: `events` may come from a days-old cache or survive a
+    /// failed sync, and a model answering from them has to know how fresh they are.
+    @Published private(set) var eventCoverage: EventCoverage?
     @Published private(set) var syncStatus: SyncStatus = .idle
     @Published private(set) var accounts: [CalendarAccount] = []
 
@@ -638,6 +642,10 @@ final class CalendarService: ObservableObject {
         await performSync(trigger: "manualAuthRetry")
     }
 
+    func setEventCoverageForTests(_ coverage: EventCoverage?) {
+        eventCoverage = coverage
+    }
+
     func replaceEventsForTests(_ events: [CalendarEvent]) {
         self.events = events
         recalculateEngagementSnapshot()
@@ -856,6 +864,21 @@ final class CalendarService: ObservableObject {
             invitationTracker.refreshUnhandled(events: events, now: clock())
             unhandledInvitationIDs = invitationTracker.unhandledEventIDs
         }
+    }
+
+    /// Feeds a failure of a request made outside this service (the MCP server's detail loads)
+    /// into the same circuit breaker as sync. Without it an agent looping over meetings with a
+    /// rejected password would keep submitting credentials — each OWA call re-authenticates once
+    /// on 401/440 — and walk the domain account into an AD lockout.
+    func reportExternalRequestFailure(_ error: Error, context: String) {
+        applyBlockingError(error, context: context)
+    }
+
+    /// Account type behind an event's `accountID`, from the account list or, failing that, the
+    /// provider that produced it.
+    func accountType(for accountID: UUID) -> AccountType? {
+        accounts.first { $0.id == accountID }?.accountType
+            ?? providers.first { $0.account.id == accountID }?.account.accountType
     }
 
     /// Maps a request error onto a blocking sync status so the circuit breaker engages and
@@ -1235,6 +1258,13 @@ final class CalendarService: ObservableObject {
                 // last fully clean sync — leaving the next launch to restore meetings from before
                 // the problem started.
                 eventCacheStore.save(events: events, rangeStart: start, rangeEnd: end)
+                // Only a full pass in which every provider answered refreshes the whole calendar.
+                // A partial (EventKit-only) pass, or one where Exchange failed while a local
+                // calendar succeeded, leaves stale meetings on screen — and `data_as_of` exists
+                // precisely to tell an MCP client that.
+                if (accountTypes == nil && failures.isEmpty) || eventCoverage == nil {
+                    eventCoverage = EventCoverage(start: start, end: end, refreshedAt: Date())
+                }
 
                 processInvitationChanges(refreshedAccountIDs: Set(fetchedByAccount.keys), windowEnd: end)
             }
@@ -1289,6 +1319,7 @@ final class CalendarService: ObservableObject {
                     // let the next scheduled cycle retry.
                     if events.isEmpty, let snapshot = eventCacheStore.load(), !snapshot.events.isEmpty {
                         events = snapshot.events.sorted { $0.startDate < $1.startDate }
+                        eventCoverage = EventCoverage(snapshot: snapshot)
                     }
                     syncStatus = events.isEmpty
                         ? .error(error.localizedDescription)
@@ -1310,6 +1341,7 @@ final class CalendarService: ObservableObject {
                 }
                 if events.isEmpty, let snapshot = eventCacheStore.load(), !snapshot.events.isEmpty {
                     events = snapshot.events.sorted { $0.startDate < $1.startDate }
+                    eventCoverage = EventCoverage(snapshot: snapshot)
                 }
 
                 if events.isEmpty {
@@ -1398,6 +1430,7 @@ final class CalendarService: ObservableObject {
     private func loadCachedEvents() {
         guard let snapshot = eventCacheStore.load() else { return }
         events = snapshot.events.sorted { $0.startDate < $1.startDate }
+        eventCoverage = EventCoverage(snapshot: snapshot)
     }
 
     private func recalculateEngagementSnapshot(now: Date = Date()) {
@@ -1413,6 +1446,25 @@ final class CalendarService: ObservableObject {
         }
         return saved
     }
+}
+
+/// The period `CalendarService.events` covers and when it was fetched.
+struct EventCoverage: Equatable, Sendable {
+    let start: Date
+    let end: Date
+    let refreshedAt: Date
+
+    init(start: Date, end: Date, refreshedAt: Date) {
+        self.start = start
+        self.end = end
+        self.refreshedAt = refreshedAt
+    }
+
+    init(snapshot: EventCacheSnapshot) {
+        self.init(start: snapshot.rangeStart, end: snapshot.rangeEnd, refreshedAt: snapshot.savedAt)
+    }
+
+    var interval: DateInterval { DateInterval(start: start, end: max(start, end)) }
 }
 
 struct EventFocusRequest: Equatable, Sendable {

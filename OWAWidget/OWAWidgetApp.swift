@@ -90,7 +90,7 @@ struct OWAWidgetApp: App {
                 .environmentObject(updateCheckService)
                 .environmentObject(appearanceService)
                 .environment(\.locale, localizationService.locale)
-                .frame(minWidth: 480, minHeight: 360)
+                .frame(minWidth: 600, minHeight: 360)
                 .onAppear {
                     DiagnosticLog.event("Window settings appeared")
                     syncLocalization()
@@ -132,6 +132,9 @@ struct OWAWidgetApp: App {
 
     private func setupGlobalHotkeyJoin() {
         GlobalHotkeyJoinService.shared.start(calendarService: calendarService)
+        // Same launch-time hook: the label renders at launch, so MCP clients can connect before
+        // the popover has ever been opened.
+        MCPServerService.shared.start(calendarService: calendarService)
     }
 
     private func configureAppIcon() {

@@ -429,3 +429,26 @@
 "invitations.pending.series.help" = "Серия, встреч в ближайшие 30 дней: %d";
 "invitations.pending.organizer" = "Организатор: %@";
 "menubar.invitations.pending" = "Новых приглашений без ответа: %d";
+
+/* MCP server (settings tab) */
+"settings.tab.mcp" = "AI (MCP)";
+"mcp.enabled" = "Разрешить AI-ассистентам читать календарь (MCP)";
+"mcp.description" = "Claude, Cursor и другие MCP-клиенты увидят ваши встречи за последние 7 дней и на 30 дней вперёд и смогут отвечать на вопросы о расписании. Только чтение: ничего в календаре и почте изменить нельзя.";
+"mcp.privacy.warning" = "Названия, места и описания встреч, а также имена и адреса участников будут уходить в AI-сервис, которым вы пользуетесь. Проверьте, разрешает ли это политика вашей компании.";
+"mcp.status" = "Статус";
+"mcp.status.stopped" = "Не запущен";
+"mcp.status.disabled" = "Выключено";
+"mcp.status.ready" = "Готов, клиентов нет";
+"mcp.status.connected" = "Подключено клиентов: %d";
+"mcp.status.unavailable" = "Недоступен: %@";
+"mcp.connect.section" = "Подключение клиента";
+"mcp.connect.claudeCode" = "Claude Code (терминал)";
+"mcp.connect.claudeDesktop" = "Claude Desktop, Cursor (JSON mcpServers)";
+"mcp.connect.vsCode" = "VS Code (.vscode/mcp.json)";
+"mcp.connect.copy" = "Скопировать";
+"mcp.connect.copied" = "Скопировано";
+"mcp.connect.hint" = "Если OWA Widget не запущен, клиент запустит его сам. Путь изменится, если переместить приложение.";
+"mcp.connect.bridgeMissing" = "В этой сборке нет MCP-моста (Contents/Helpers/owawidget-mcp). Соберите приложение через make run или установите релизную сборку.";
+"mcp.journal.section" = "Последние запросы";
+"mcp.journal.empty" = "Запросов пока не было.";
+"mcp.journal.hint" = "Хранится в памяти до выхода из приложения. Записываются только инструмент и клиент — ни вопросы, ни ответы.";

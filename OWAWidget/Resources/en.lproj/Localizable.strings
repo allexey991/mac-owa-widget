@@ -429,3 +429,26 @@
 "invitations.pending.series.help" = "Series, meetings in the next 30 days: %d";
 "invitations.pending.organizer" = "Organizer: %@";
 "menubar.invitations.pending" = "New invitations awaiting response: %d";
+
+/* MCP server (settings tab) */
+"settings.tab.mcp" = "AI (MCP)";
+"mcp.enabled" = "Allow AI assistants to read the calendar (MCP)";
+"mcp.description" = "Claude, Cursor and other MCP clients can see your meetings for the last 7 days and the next 30, and answer questions about your schedule. Read only: nothing in the calendar or mail can be changed.";
+"mcp.privacy.warning" = "Meeting titles, locations and descriptions, and the names and addresses of attendees, will be sent to the AI service you use. Check that your company's policy allows this.";
+"mcp.status" = "Status";
+"mcp.status.stopped" = "Not started";
+"mcp.status.disabled" = "Off";
+"mcp.status.ready" = "Ready, no clients connected";
+"mcp.status.connected" = "Clients connected: %d";
+"mcp.status.unavailable" = "Unavailable: %@";
+"mcp.connect.section" = "Connect a client";
+"mcp.connect.claudeCode" = "Claude Code (terminal)";
+"mcp.connect.claudeDesktop" = "Claude Desktop, Cursor (mcpServers JSON)";
+"mcp.connect.vsCode" = "VS Code (.vscode/mcp.json)";
+"mcp.connect.copy" = "Copy";
+"mcp.connect.copied" = "Copied";
+"mcp.connect.hint" = "If OWA Widget is not running, the client starts it. The path changes if you move the app.";
+"mcp.connect.bridgeMissing" = "This build has no MCP bridge (Contents/Helpers/owawidget-mcp). Build the app with make run or install a release build.";
+"mcp.journal.section" = "Recent requests";
+"mcp.journal.empty" = "No requests yet.";
+"mcp.journal.hint" = "Kept in memory until the app quits. Only the tool and the client are recorded, never what was asked or answered.";

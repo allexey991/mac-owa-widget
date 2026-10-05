@@ -55,7 +55,7 @@ final class PopoverViewLayoutTests: XCTestCase {
             isAllDay: true
         )
 
-        let result = PopoverView.NextEventsPolicy.nextEvents(from: [allDay], now: now)
+        let result = NextMeetingGroupPolicy.bannerGroup(from: [allDay], now: now)
 
         XCTAssertTrue(result.isEmpty)
     }
@@ -69,7 +69,7 @@ final class PopoverViewLayoutTests: XCTestCase {
             isAllDay: false
         )
 
-        let result = PopoverView.NextEventsPolicy.nextEvents(from: [upcoming], now: now)
+        let result = NextMeetingGroupPolicy.bannerGroup(from: [upcoming], now: now)
 
         XCTAssertEqual(result.map(\.id), ["regular"])
     }
@@ -82,7 +82,7 @@ final class PopoverViewLayoutTests: XCTestCase {
             endDate: now.addingTimeInterval(61 * 60)
         )
 
-        let result = PopoverView.NextEventsPolicy.nextEvents(from: [distant], now: now)
+        let result = NextMeetingGroupPolicy.bannerGroup(from: [distant], now: now)
 
         XCTAssertTrue(result.isEmpty)
     }
@@ -105,7 +105,7 @@ final class PopoverViewLayoutTests: XCTestCase {
             endDate: now.addingTimeInterval(38 * 60)
         )
 
-        let result = PopoverView.NextEventsPolicy.nextEvents(from: [current, upcomingSoon, nearPromoted], now: now)
+        let result = NextMeetingGroupPolicy.bannerGroup(from: [current, upcomingSoon, nearPromoted], now: now)
 
         XCTAssertEqual(result.map(\.id), ["upcoming-soon", "near-promoted"])
     }
@@ -125,7 +125,7 @@ final class PopoverViewLayoutTests: XCTestCase {
             joinURL: URL(string: "https://teams.example.com/join")
         )
 
-        let result = PopoverView.NextEventsPolicy.nextEvents(from: [noURL, withURL], now: now)
+        let result = NextMeetingGroupPolicy.bannerGroup(from: [noURL, withURL], now: now)
 
         XCTAssertEqual(result.map(\.id), ["with-url", "no-url"])
     }
@@ -150,7 +150,7 @@ final class PopoverViewLayoutTests: XCTestCase {
             endDate: now.addingTimeInterval(37 * 60)
         )
 
-        let result = PopoverView.NextEventsPolicy.nextEvents(
+        let result = NextMeetingGroupPolicy.bannerGroup(
             from: [cancelledByTitle, cancelledByFlag, valid],
             now: now
         )

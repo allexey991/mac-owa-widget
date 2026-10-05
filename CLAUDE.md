@@ -16,6 +16,7 @@ OWAWidget — macOS menu bar приложение на Swift 6 и SwiftUI для
 - `OWAWidget/Services/` — сервисы состояния, синхронизации, уведомлений и keychain.
 - `OWAWidget/Providers/` — календарные провайдеры (OWA и будущие интеграции).
 - `OWAWidget/Views/` — SwiftUI интерфейс popover и настроек.
+- `OWAWidget/MCP/`, `OWAWidgetMCPBridge/`, `OWAWidgetMCPShared/` — MCP-сервер для AI-ассистентов (только чтение) и stdio-мост к нему.
 
 ## Базовые команды
 
