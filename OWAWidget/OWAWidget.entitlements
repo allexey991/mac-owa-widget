@@ -6,6 +6,11 @@
          rejects non-ASCII bytes even inside comments and fails the build with
          "AMFIUnserializeXML: syntax error near line N". `plutil -lint` accepts
          such a file, so it will not warn you. Keep dashes and quotes plain. -->
+    <!-- Builds signed with a certificate (Developer ID releases, Apple
+         Development). Same keys as OWAWidget-dev.entitlements without
+         disable-library-validation: Sparkle is re-signed with the same Team ID,
+         so library validation stays on (verified on a probe, 2026-10-05).
+         Keep the shared keys in sync between the two files. -->
     <!-- Outbound HTTPS to Exchange servers -->
     <key>com.apple.security.network.client</key>
     <true/>
@@ -16,15 +21,6 @@
          milliseconds, the status stays notDetermined and no system prompt is
          ever shown - verified on a probe build, 2026-08-22. -->
     <key>com.apple.security.personal-information.calendars</key>
-    <true/>
-    <!-- Ad-hoc builds only. Hardened runtime is on (see scripts/sign_app.sh).
-         It would also turn on library validation, which refuses to load the
-         ad-hoc signed Sparkle.framework. Disabling library validation alone
-         keeps the rest of hardened runtime, notably that DYLD environment
-         variables stay ignored. Builds signed with a certificate use
-         OWAWidget.entitlements, which keeps library validation on.
-         Keep the other keys in sync with that file. -->
-    <key>com.apple.security.cs.disable-library-validation</key>
     <true/>
 </dict>
 </plist>

@@ -12,8 +12,9 @@
 # Что делает скрипт:
 #   1. «Старая» сторона — распакованный ранее опубликованный архив, то есть ровно то, что стоит
 #      у людей. Меняются только bundle id (чтобы не задеть рабочую копию и её данные), адрес
-#      фида и ATS; подпись воспроизводится ad-hoc БЕЗ hardened runtime.
-#   2. «Новая» сторона — текущая сборка из .build, подписанная как сейчас подписывает Makefile.
+#      фида и ATS; подпись — ad-hoc с entitlements и флагами самого архива.
+#   2. «Новая» сторона — текущая сборка из .build, подписанная scripts/sign_app.sh тем же
+#      сертификатом, что и релиз (Developer ID). Для проверки без сертификата: --identity -
 #   3. Архив, appcast с подписью и локальный HTTP-сервер.
 #   4. Запуск «старой» версии, которая проверяет обновления на localhost.
 #
@@ -25,6 +26,7 @@
 #   bash scripts/test_update_locally.sh                 # собрать, поднять сервер, запустить
 #   bash scripts/test_update_locally.sh --prepare-only  # только собрать и проверить, без запуска
 #   bash scripts/test_update_locally.sh --clean         # убрать за собой и выйти
+#   bash scripts/test_update_locally.sh --identity -    # новая сторона ad-hoc вместо Developer ID
 #
 # Ctrl-C останавливает сервер и убирает следы.
 set -euo pipefail
@@ -39,6 +41,8 @@ NEW_VERSION="${NEW_VERSION:-99.0.0}"
 NEW_BUILD="${NEW_BUILD:-99000}"
 OLD_ARCHIVE=""
 MODE="run"
+# По умолчанию — как в релизе (RELEASE_SIGN_IDENTITY в Makefile).
+NEW_IDENTITY="${NEW_IDENTITY:-Developer ID Application}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -46,6 +50,7 @@ while [[ $# -gt 0 ]]; do
     --clean)        MODE="clean"; shift ;;
     --old)          OLD_ARCHIVE="$2"; shift 2 ;;
     --port)         PORT="$2"; shift 2 ;;
+    --identity)     NEW_IDENTITY="$2"; shift 2 ;;
     *) echo "Неизвестный аргумент: $1" >&2; exit 2 ;;
   esac
 done
@@ -109,27 +114,19 @@ ditto -x -k "${OLD_ARCHIVE}" "${WORK_DIR}/old"
 OLD_APP="${WORK_DIR}/old/OWAWidget.app"
 [[ -d "${OLD_APP}" ]] || { echo "В архиве нет OWAWidget.app" >&2; exit 1; }
 patch_plist "${OLD_APP}"
-cat > "${WORK_DIR}/old.entitlements" <<'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-<key>com.apple.security.network.client</key><true/>
-</dict></plist>
-EOF
-# Намеренно без --options runtime: воспроизводим подпись уже установленной версии.
-codesign --sign - --force --deep "${OLD_APP}/Contents/Frameworks/Sparkle.framework" >/dev/null 2>&1
-codesign --sign - --force --deep --entitlements "${WORK_DIR}/old.entitlements" "${OLD_APP}" >/dev/null 2>&1
+# Правка Info.plist ломает подпись, поэтому переподписываем — но с entitlements и флагами
+# (hardened runtime) самого архива, у каждого вложенного компонента свои: так старая сторона
+# остаётся тем, что стоит у людей, а не тем, как мы подписываем сейчас.
+codesign --sign - --force --deep --preserve-metadata=entitlements,flags "${OLD_APP}" >/dev/null 2>&1
 echo "   подпись: $(codesign -dv "${OLD_APP}" 2>&1 | grep -o 'flags=[^ ]*')"
 
 echo "== Новая сторона: текущая сборка =="
 ditto "${BUILT_APP}" "${WORK_DIR}/new/OWAWidget.app"
 NEW_APP="${WORK_DIR}/new/OWAWidget.app"
 patch_plist "${NEW_APP}" "${NEW_VERSION}" "${NEW_BUILD}"
-codesign --sign - --force --deep --options runtime \
-  "${NEW_APP}/Contents/Frameworks/Sparkle.framework" >/dev/null 2>&1
-codesign --sign - --force --deep --options runtime \
-  --entitlements "${ROOT_DIR}/OWAWidget/OWAWidget-dev.entitlements" "${NEW_APP}" >/dev/null 2>&1
-echo "   подпись: $(codesign -dv "${NEW_APP}" 2>&1 | grep -o 'flags=[^ ]*')"
+# Тот же скрипт, что и в Makefile: стенд проверяет ровно ту подпись, что получат пользователи.
+bash "${ROOT_DIR}/scripts/sign_app.sh" "${NEW_APP}" "${NEW_IDENTITY}" >/dev/null 2>&1
+echo "   подпись: $(codesign -dvv "${NEW_APP}" 2>&1 | grep -m1 -E '^(Authority|Signature)=') $(codesign -dv "${NEW_APP}" 2>&1 | grep -o 'flags=[^ ]*')"
 
 echo "== Архив и appcast =="
 ditto -c -k --sequesterRsrc --keepParent "${NEW_APP}" \
@@ -176,7 +173,7 @@ cat <<EOF
 Как проверить результат:
   /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" \\
     "${OLD_APP}/Contents/Info.plist"        # ждём ${NEW_VERSION}
-  codesign -dv "${OLD_APP}" 2>&1 | grep -o 'flags=[^ ]*'   # ждём adhoc,runtime
+  codesign -dvv "${OLD_APP}" 2>&1 | grep -m1 -E '^(Authority|Signature)='   # ждём подпись новой стороны
 
 Ctrl-C — остановить сервер и убрать следы.
 EOF

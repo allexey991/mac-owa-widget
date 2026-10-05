@@ -4,9 +4,12 @@ SRC_DIR     := OWAWidget
 # Empty = host default (arm64 on Apple Silicon). Release packaging sets both macOS arches.
 SWIFT_BUILD_ARGS ?=
 RELEASE_SWIFT_BUILD_ARGS := --arch arm64 --arch x86_64
-ENTITLEMENTS := $(SRC_DIR)/OWAWidget-dev.entitlements
 INFO_PLIST  := $(SRC_DIR)/Info.plist
 CODE_SIGN_IDENTITY ?= -
+# Releases must be Developer ID signed: TCC and Keychain grants then survive Sparkle updates, and
+# only such builds can be notarized. codesign matches the name by substring, so this picks the
+# certificate from the login Keychain; pass its SHA-1 if several Developer ID certificates match.
+RELEASE_SIGN_IDENTITY ?= Developer ID Application
 APP_BUNDLE_ID_BASE := com.owawidget.MacOwaWidget
 APP_BUNDLE_ID_DEV := $(APP_BUNDLE_ID_BASE).dev
 APP_BUNDLE_ID ?= $(APP_BUNDLE_ID_BASE)
@@ -68,22 +71,16 @@ bundle: build
 	fi
 	@rm -rf "$(APP_PATH)/Contents/Frameworks/Sparkle.framework"
 	@ditto "$(SPARKLE_FRAMEWORK)" "$(APP_PATH)/Contents/Frameworks/Sparkle.framework"
-	@# Sign nested helpers + framework first, then the app, all with the same identity.
-	@# Hardened runtime (--options runtime) is enabled even for ad-hoc identities.
-	@# It would normally turn on library validation, which refuses to load
-	@# Sparkle.framework (its ad-hoc signature carries no matching Team ID) — so the
-	@# entitlements file disables *library validation* specifically. Everything else
-	@# hardened runtime provides stays on; most importantly DYLD_* environment
-	@# variables are ignored, so DYLD_INSERT_LIBRARIES can no longer inject code into
-	@# this process to reach its Keychain items.
-	@codesign --sign "$(CODE_SIGN_IDENTITY)" --force --deep --options runtime \
-	  "$(APP_PATH)/Contents/Frameworks/Sparkle.framework"
-	codesign --sign "$(CODE_SIGN_IDENTITY)" --entitlements $(ENTITLEMENTS) --force --deep --options runtime $(APP_PATH)
+	@# Signing (identity, entitlements, nested Sparkle helpers) lives in one script
+	@# shared with scripts/test_update_locally.sh; see the rationale there.
+	bash scripts/sign_app.sh "$(APP_PATH)" "$(CODE_SIGN_IDENTITY)"
 	@echo "✓ Bundle ready: $(APP_PATH)"
 
 ## Release .app bundle: universal binary (Apple Silicon + Intel)
 release-bundle:
-	@$(MAKE) bundle SWIFT_BUILD_ARGS="$(RELEASE_SWIFT_BUILD_ARGS)"
+	@$(MAKE) bundle SWIFT_BUILD_ARGS="$(RELEASE_SWIFT_BUILD_ARGS)" CODE_SIGN_IDENTITY="$(RELEASE_SIGN_IDENTITY)"
+	@codesign -dvv "$(APP_PATH)" 2>&1 | grep -q '^Authority=Developer ID Application:' || \
+	  (echo "Release bundle is not Developer ID signed (RELEASE_SIGN_IDENTITY=$(RELEASE_SIGN_IDENTITY))." >&2 && exit 1)
 	@lipo -info "$(APP_PATH)/Contents/MacOS/$(APP_NAME)" | grep -q 'x86_64' || \
 	  (echo "Release binary missing x86_64 (Intel). Check SWIFT_BUILD_ARGS." >&2 && exit 1)
 	@lipo -info "$(APP_PATH)/Contents/MacOS/$(APP_NAME)" | grep -q 'arm64' || \
@@ -92,8 +89,8 @@ release-bundle:
 
 ## Build .app and package release zip + appcast.xml.
 ## Internally delegates to scripts/package_release.sh which:
-##   1) builds the bundle (re-invokes this Makefile's bundle target),
-##   2) creates the versioned zip,
+##   1) builds the Developer ID signed bundle (re-invokes this Makefile's release-bundle target),
+##   2) notarizes and staples it, then creates the versioned zip,
 ##   3) EdDSA-signs it via Sparkle's sign_update,
 ##   4) emits dist/appcast.xml with the resulting signature/length.
 release-package: validate-release-notes test

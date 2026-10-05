@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #
-# Build OWAWidget.app, package it as a versioned zip, EdDSA-sign the archive
-# with Sparkle's `sign_update`, and emit `dist/appcast.xml` with the resulting
-# signature/length so Sparkle clients can verify and install the update.
+# Build OWAWidget.app signed with Developer ID, notarize and staple it, package
+# it as a versioned zip, EdDSA-sign the archive with Sparkle's `sign_update`, and
+# emit `dist/appcast.xml` with the resulting signature/length so Sparkle clients
+# can verify and install the update.
 #
 # Outputs (printed at the end, parsed by the caller):
 #   VERSION=<x.y.z>
@@ -20,6 +21,13 @@
 # When neither source produces a valid signature, the script aborts so we
 # never publish a release that existing clients cannot install.
 #
+# Notarization uses a notarytool Keychain profile (default `owawidget-notary`,
+# override with NOTARY_PROFILE), created once per machine:
+#   xcrun notarytool store-credentials owawidget-notary \
+#     --key AuthKey_<KEYID>.p8 --key-id <KEYID> --issuer <ISSUER-UUID>
+# A release that is not notarized is rejected by Gatekeeper on first launch, so
+# there is no flag to skip it.
+#
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -32,6 +40,8 @@ DIST_DIR="${ROOT_DIR}/dist"
 SPARKLE_ARTIFACTS_DIR="${ROOT_DIR}/.build/artifacts/sparkle/Sparkle"
 SIGN_UPDATE_BIN="${SPARKLE_ARTIFACTS_DIR}/bin/sign_update"
 GENERATE_APPCAST_BIN="${SPARKLE_ARTIFACTS_DIR}/bin/generate_appcast"
+
+NOTARY_PROFILE="${NOTARY_PROFILE:-owawidget-notary}"
 
 REPO_OWNER="ilyabazhenov"
 REPO_NAME="mac-owa-widget"
@@ -53,6 +63,21 @@ if [[ ! -f "${RELEASE_NOTES_FILE}" ]]; then
   exit 1
 fi
 
+# Fail before the build, not after it: both checks are cheap, the build is not.
+if ! security find-identity -v -p codesigning | grep -q '"Developer ID Application: '; then
+  echo "No valid 'Developer ID Application' certificate in the login Keychain." >&2
+  echo "Releases must be Developer ID signed; see AGENTS.md, release process." >&2
+  exit 1
+fi
+if ! xcrun notarytool history --keychain-profile "${NOTARY_PROFILE}" >/dev/null 2>&1; then
+  echo "notarytool profile '${NOTARY_PROFILE}' is missing or its credentials are rejected." >&2
+  echo "Create it once: xcrun notarytool store-credentials ${NOTARY_PROFILE} --key <AuthKey.p8> --key-id <KEYID> --issuer <ISSUER>" >&2
+  exit 1
+fi
+
+WORK_DIR="$(mktemp -d)"
+trap 'rm -rf "${WORK_DIR}"' EXIT
+
 echo "Building universal bundle (arm64 + x86_64) for version ${VERSION}" >&2
 make -C "${ROOT_DIR}" release-bundle >&2
 
@@ -60,6 +85,37 @@ if [[ ! -d "${APP_PATH}" ]]; then
   echo "App bundle not found at ${APP_PATH}" >&2
   exit 1
 fi
+
+# Notarize, then staple the ticket into the bundle so Gatekeeper accepts the app
+# offline on first launch. Stapling must happen before the release zip is made:
+# the ticket travels inside the .app.
+echo "Notarizing ${APP_PATH} (profile ${NOTARY_PROFILE}); this takes a few minutes..." >&2
+NOTARY_ZIP="${WORK_DIR}/notarize.zip"
+NOTARY_RESULT="${WORK_DIR}/notary.json"
+ditto -c -k --keepParent "${APP_PATH}" "${NOTARY_ZIP}"
+xcrun notarytool submit "${NOTARY_ZIP}" --keychain-profile "${NOTARY_PROFILE}" \
+  --wait --output-format json > "${NOTARY_RESULT}" || true
+NOTARY_STATUS="$(plutil -extract status raw -o - "${NOTARY_RESULT}" 2>/dev/null || echo unknown)"
+NOTARY_ID="$(plutil -extract id raw -o - "${NOTARY_RESULT}" 2>/dev/null || true)"
+if [[ "${NOTARY_STATUS}" != "Accepted" ]]; then
+  echo "Notarization failed: status=${NOTARY_STATUS}" >&2
+  cat "${NOTARY_RESULT}" >&2 || true
+  if [[ -n "${NOTARY_ID}" ]]; then
+    echo "Notary log:" >&2
+    xcrun notarytool log "${NOTARY_ID}" --keychain-profile "${NOTARY_PROFILE}" >&2 || true
+  fi
+  exit 1
+fi
+echo "✓ Notarized (submission ${NOTARY_ID})" >&2
+
+xcrun stapler staple "${APP_PATH}" >&2
+GATEKEEPER="$(spctl --assess --type execute -vv "${APP_PATH}" 2>&1 || true)"
+if ! grep -q 'source=Notarized Developer ID' <<<"${GATEKEEPER}"; then
+  echo "Gatekeeper does not accept the stapled app:" >&2
+  echo "${GATEKEEPER}" >&2
+  exit 1
+fi
+echo "✓ Gatekeeper: accepted, Notarized Developer ID" >&2
 
 mkdir -p "${DIST_DIR}"
 ARCHIVE_PATH="${DIST_DIR}/${APP_NAME}-v${VERSION}-macos.zip"
@@ -128,8 +184,8 @@ if [[ ! -x "${GENERATE_APPCAST_BIN}" ]]; then
   exit 1
 fi
 
-TMP_APPCAST_DIR="$(mktemp -d)"
-trap 'rm -rf "${TMP_APPCAST_DIR}"' EXIT
+TMP_APPCAST_DIR="${WORK_DIR}/appcast"
+mkdir -p "${TMP_APPCAST_DIR}"
 cp "${ARCHIVE_PATH}" "${TMP_APPCAST_DIR}/"
 
 # Drop a release-notes file next to the archive with a matching base name so
