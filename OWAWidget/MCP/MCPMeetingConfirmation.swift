@@ -120,6 +120,7 @@ final class MCPConfirmationPanel: MCPConfirmationPresenting {
         let localization = LocalizationService()
         let view = MCPMeetingConfirmationView(
             proposal: proposal,
+            shownAt: Date(),
             deadline: deadline,
             localization: localization,
             onConfirm: onConfirm,

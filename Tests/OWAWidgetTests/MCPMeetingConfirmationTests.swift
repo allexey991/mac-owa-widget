@@ -91,3 +91,40 @@ final class MCPMeetingConfirmationTests: XCTestCase {
         XCTAssertEqual(secondOutcome, .rejected)
     }
 }
+
+/// The date line of the confirmation panel, in both languages.
+@MainActor
+final class MCPMeetingConfirmationTextTests: XCTestCase {
+    private var calendar: Calendar { AppTimeZone.calendar }
+
+    private func at(dayOffset: Int, hour: Int, from base: Date) -> Date {
+        let day = calendar.date(byAdding: .day, value: dayOffset, to: calendar.startOfDay(for: base))!
+        return calendar.date(bySettingHour: hour, minute: 0, second: 0, of: day)!
+    }
+
+    func testTodayAndTomorrowAreSaidInWords() {
+        let now = Date()
+        let russian = LocalizationService(selectedLanguage: .russian)
+        let english = LocalizationService(selectedLanguage: .english)
+
+        let today = MCPMeetingConfirmationView.dayText(at(dayOffset: 0, hour: 23, from: now), now: now, localization: russian)
+        let tomorrow = MCPMeetingConfirmationView.dayText(at(dayOffset: 1, hour: 10, from: now), now: now, localization: russian)
+        let later = MCPMeetingConfirmationView.dayText(at(dayOffset: 3, hour: 10, from: now), now: now, localization: russian)
+        let englishTomorrow = MCPMeetingConfirmationView.dayText(at(dayOffset: 1, hour: 10, from: now), now: now, localization: english)
+
+        XCTAssertTrue(today.hasPrefix("Сегодня, "), today)
+        XCTAssertTrue(tomorrow.hasPrefix("Завтра, "), tomorrow)
+        XCTAssertFalse(later.contains("Завтра") || later.contains("Сегодня"), later)
+        XCTAssertEqual(later.first?.isUppercase, true, later)
+        XCTAssertTrue(englishTomorrow.hasPrefix("Tomorrow, "), englishTomorrow)
+    }
+
+    func testTimeLineHasRangeAndDuration() {
+        let start = at(dayOffset: 2, hour: 15, from: Date())
+        let text = MCPMeetingConfirmationView.timeText(
+            start, start.addingTimeInterval(45 * 60), now: Date(), localization: LocalizationService(selectedLanguage: .russian)
+        )
+        XCTAssertTrue(text.hasPrefix("15:00–15:45"), text)
+        XCTAssertTrue(text.hasSuffix("45 минут"), text)
+    }
+}

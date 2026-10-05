@@ -1,15 +1,20 @@
+import AppKit
 import SwiftUI
 
-/// What an MCP client wants to create, with "Create" and "Cancel". Shown by
-/// `MCPMeetingConfirmationController`; nothing is sent to Exchange before "Create".
+/// What an MCP client wants to create, with "Cancel" and a button named after what it does
+/// ("Add to Calendar" / "Send Invitations"). Shown by `MCPMeetingConfirmationController`;
+/// nothing is sent to Exchange before that button.
 struct MCPMeetingConfirmationView: View {
     /// Internal attendees shown per section; external ones are always all shown.
     static let visibleAttendeeLimit = 8
     /// Longer agendas scroll instead of being cut: whatever the attendees get, the user must be
-    /// able to read before pressing Create.
+    /// able to read before confirming.
     static let inlineAgendaLimit = 300
+    /// The countdown turns orange for the last seconds, so the panel does not vanish unexpectedly.
+    static let urgentSeconds: TimeInterval = 10
 
     let proposal: MCPMeetingProposal
+    let shownAt: Date
     let deadline: Date
     let localization: LocalizationService
     let onConfirm: () -> Void
@@ -17,35 +22,26 @@ struct MCPMeetingConfirmationView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 header
                 meeting
                 attendees
                 if !proposal.conflicts.isEmpty { conflicts }
                 if !agendaText.isEmpty { agenda }
             }
-            .padding(14)
+            .padding(16)
 
-            Divider().opacity(0.7)
-
-            HStack(spacing: 10) {
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    Text(localization.tr("mcp.confirm.countdown", max(0, Int(deadline.timeIntervalSince(context.date).rounded(.up)))))
-                        .font(.system(size: 11).monospacedDigit())
-                        .foregroundStyle(.secondary)
+            TimelineView(.animation(minimumInterval: 0.25)) { context in
+                VStack(spacing: 0) {
+                    countdownBar(remaining: remaining(at: context.date))
+                    footer(remaining: remaining(at: context.date))
                 }
-                Spacer()
-                Button(localization.tr("mcp.confirm.reject"), action: onReject)
-                    .keyboardShortcut(.cancelAction)
-                // No default-action shortcut: a stray Return must not send invitations.
-                Button(localization.tr("mcp.confirm.create"), action: onConfirm)
-                    .buttonStyle(.borderedProminent)
             }
-            .controlSize(.regular)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
         }
         .frame(width: 420, alignment: .leading)
+        // Empty areas drag the window: it opens in the middle of the screen and may cover what
+        // the user needs to see to decide.
+        .background(WindowDragArea())
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(Color(nsColor: .windowBackgroundColor))
@@ -57,6 +53,8 @@ struct MCPMeetingConfirmationView: View {
         }
         .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
     }
+
+    // MARK: - Sections
 
     private var header: some View {
         HStack(spacing: 8) {
@@ -75,16 +73,17 @@ struct MCPMeetingConfirmationView: View {
     private var meeting: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(proposal.title)
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(size: 15, weight: .semibold))
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
-            Text(timeText)
+            Text(dayText)
                 .font(.system(size: 12))
+            Text(timeText)
+                .font(.system(size: 12).monospacedDigit())
+                .foregroundStyle(.secondary)
             if !proposal.location.isEmpty {
-                Label(proposal.location, systemImage: "mappin.and.ellipse")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                note(proposal.location, icon: "mappin.and.ellipse")
+                    .padding(.top, 2)
             }
         }
     }
@@ -92,29 +91,18 @@ struct MCPMeetingConfirmationView: View {
     @ViewBuilder
     private var attendees: some View {
         if proposal.required.isEmpty && proposal.optional.isEmpty {
-            Text(localization.tr("mcp.confirm.noAttendees"))
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            note(localization.tr("mcp.confirm.noAttendees"), icon: "person.crop.circle.badge.xmark")
         } else {
             VStack(alignment: .leading, spacing: 4) {
                 attendeeSection(localization.tr("mcp.confirm.required"), proposal.required)
                 attendeeSection(localization.tr("mcp.confirm.optional"), proposal.optional)
                 if !proposal.externalCheckAvailable {
-                    Label(localization.tr("mcp.confirm.externalUnknown"), systemImage: "questionmark.diamond.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.orange)
-                        .fixedSize(horizontal: false, vertical: true)
+                    note(localization.tr("mcp.confirm.externalUnknown"), icon: "questionmark.diamond.fill", color: .orange)
+                        .padding(.top, 2)
                 } else if proposal.hasExternalAttendees {
-                    Label(localization.tr("mcp.confirm.externalWarning"), systemImage: "exclamationmark.triangle.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.orange)
-                        .fixedSize(horizontal: false, vertical: true)
+                    note(localization.tr("mcp.confirm.externalWarning"), icon: "exclamationmark.triangle.fill", color: .orange)
+                        .padding(.top, 2)
                 }
-                Text(localization.tr("mcp.confirm.invitationsNote"))
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -155,67 +143,157 @@ struct MCPMeetingConfirmationView: View {
 
     private var conflicts: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Label(localization.tr("mcp.confirm.conflicts"), systemImage: "exclamationmark.circle")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.orange)
+            note(localization.tr("mcp.confirm.conflicts"), icon: "exclamationmark.circle", color: .orange)
             ForEach(Array(proposal.conflicts.prefix(3).enumerated()), id: \.offset) { _, conflict in
                 Text("\(Self.hoursText(conflict.start, conflict.end, locale: localization.locale))  \(conflict.title)")
-                    .font(.system(size: 11))
+                    .font(.system(size: 11).monospacedDigit())
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .padding(.leading, 18)
             }
         }
     }
 
-    private var timeText: String {
-        let day = DateFormatter()
-        day.locale = localization.locale
-        day.timeZone = AppTimeZone.zone
-        day.setLocalizedDateFormatFromTemplate("EEEEdMMMM")
-        let minutes = Int(proposal.end.timeIntervalSince(proposal.start) / 60)
-        return "\(day.string(from: proposal.start)), \(Self.hoursText(proposal.start, proposal.end, locale: localization.locale)) · \(localization.minutes(minutes))"
+    /// The text the attendees will get, framed so it does not read as the app's own notes.
+    private var agenda: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(hasAttendees ? localization.tr("mcp.confirm.agendaForAttendees") : localization.tr("mcp.confirm.agenda"))
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+            Group {
+                if isLongAgenda {
+                    ScrollView { agendaBody }
+                        .frame(height: 150)
+                } else {
+                    agendaBody
+                }
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.primary.opacity(0.05))
+            )
+        }
+    }
+
+    private var agendaBody: some View {
+        Text(agendaText)
+            .font(.system(size: 12))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .textSelection(.enabled)
+            .padding(8)
+    }
+
+    private func countdownBar(remaining: TimeInterval) -> some View {
+        let total = max(1, deadline.timeIntervalSince(shownAt))
+        return GeometryReader { geometry in
+            Rectangle()
+                .fill(countdownColor(remaining).opacity(0.7))
+                .frame(width: geometry.size.width * max(0, min(1, remaining / total)))
+        }
+        .frame(height: 2)
+        .background(Color.primary.opacity(0.08))
+    }
+
+    private func footer(remaining: TimeInterval) -> some View {
+        HStack(spacing: 10) {
+            // The countdown gives way, never the buttons: a cut "Send Invitati…" hides what the
+            // button does.
+            Text(localization.tr("mcp.confirm.countdown", Int(remaining.rounded(.up))))
+                .font(.system(size: 11).monospacedDigit())
+                .foregroundStyle(countdownColor(remaining))
+                .lineLimit(1)
+                .layoutPriority(-1)
+            Spacer(minLength: 4)
+            Button(localization.tr("mcp.confirm.reject"), action: onReject)
+                .keyboardShortcut(.cancelAction)
+                .fixedSize()
+            // No default-action shortcut: a stray Return must not send invitations.
+            Button(confirmTitle, action: onConfirm)
+                .buttonStyle(.borderedProminent)
+                .fixedSize()
+        }
+        .controlSize(.regular)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+
+    private func note(_ text: String, icon: String, color: Color = .secondary) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 11))
+                .frame(width: 12)
+            Text(text)
+                .font(.system(size: 11))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .foregroundStyle(color)
+    }
+
+    // MARK: - Text
+
+    private var hasAttendees: Bool {
+        !(proposal.required.isEmpty && proposal.optional.isEmpty)
+    }
+
+    /// Named after the consequence: with attendees the button sends mail to people.
+    private var confirmTitle: String {
+        hasAttendees ? localization.tr("mcp.confirm.sendInvitations") : localization.tr("mcp.confirm.addToCalendar")
     }
 
     private var agendaText: String {
         proposal.agenda.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    @ViewBuilder
-    private var agenda: some View {
-        let text = agendaText
-        if text.count <= Self.inlineAgendaLimit && text.filter({ $0 == "\n" }).count < 6 {
-            Text(text)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-        } else {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(localization.tr("mcp.confirm.agendaLong", text.count))
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-                ScrollView {
-                    Text(text)
-                        .font(.system(size: 11))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-                        .padding(6)
-                }
-                .frame(height: 150)
-                .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(Color(nsColor: .textBackgroundColor).opacity(0.6))
-                )
-            }
-        }
+    private var isLongAgenda: Bool {
+        agendaText.count > Self.inlineAgendaLimit || agendaText.filter { $0 == "\n" }.count >= 6
     }
 
-    /// External addresses always, then internal ones up to the limit: the address the user most
-    /// needs to see must never hide behind "and N more".
-    static func visibleAttendees(_ people: [MCPMeetingProposal.Attendee]) -> [MCPMeetingProposal.Attendee] {
-        let external = people.filter(\.isExternal)
-        let internalPeople = people.filter { !$0.isExternal }
-        return external + internalPeople.prefix(max(0, visibleAttendeeLimit - external.count))
+    private var dayText: String {
+        Self.dayText(proposal.start, now: shownAt, localization: localization)
+    }
+
+    private var timeText: String {
+        Self.timeText(proposal.start, proposal.end, now: shownAt, localization: localization)
+    }
+
+    private func remaining(at date: Date) -> TimeInterval {
+        max(0, deadline.timeIntervalSince(date))
+    }
+
+    private func countdownColor(_ remaining: TimeInterval) -> Color {
+        remaining <= Self.urgentSeconds ? .orange : .secondary
+    }
+
+    /// "Завтра, среда, 7 октября" / "Tomorrow, Wednesday, October 7"; the relative word only for
+    /// today and tomorrow, in the display time zone the calendar is shown in.
+    static func dayText(_ start: Date, now: Date, localization: LocalizationService) -> String {
+        let calendar = AppTimeZone.calendar
+        let formatter = DateFormatter()
+        formatter.locale = localization.locale
+        formatter.timeZone = AppTimeZone.zone
+        formatter.setLocalizedDateFormatFromTemplate("EEEEdMMMM")
+        var text = formatter.string(from: start)
+        let today = calendar.startOfDay(for: now)
+        let day = calendar.startOfDay(for: start)
+        let offset = calendar.dateComponents([.day], from: today, to: day).day
+        if offset == 0 {
+            text = localization.tr("mcp.confirm.today") + ", " + text
+        } else if offset == 1 {
+            text = localization.tr("mcp.confirm.tomorrow") + ", " + text
+        }
+        return text.prefix(1).uppercased(with: localization.locale) + text.dropFirst()
+    }
+
+    /// "19:00–19:15 · 15 минут", with the zone when it is not the Mac's: the app may show
+    /// Samara time on a Mac set to Moscow, and an unlabelled hour would be an hour off.
+    static func timeText(_ start: Date, _ end: Date, now: Date, localization: LocalizationService) -> String {
+        var text = hoursText(start, end, locale: localization.locale)
+        if AppTimeZone.zone.secondsFromGMT(for: start) != TimeZone.current.secondsFromGMT(for: start) {
+            text += " (\(AppTimeZone.shortLabel))"
+        }
+        let minutes = Int(end.timeIntervalSince(start) / 60)
+        return text + " · " + localization.minutes(minutes)
     }
 
     static func hoursText(_ start: Date, _ end: Date, locale: Locale) -> String {
@@ -225,10 +303,32 @@ struct MCPMeetingConfirmationView: View {
         time.setLocalizedDateFormatFromTemplate("Hmm")
         return "\(time.string(from: start))–\(time.string(from: end))"
     }
+
+    /// External addresses always, then internal ones up to the limit: the address the user most
+    /// needs to see must never hide behind "and N more".
+    static func visibleAttendees(_ people: [MCPMeetingProposal.Attendee]) -> [MCPMeetingProposal.Attendee] {
+        let external = people.filter(\.isExternal)
+        let internalPeople = people.filter { !$0.isExternal }
+        return external + internalPeople.prefix(max(0, visibleAttendeeLimit - external.count))
+    }
 }
 
 extension MCPMeetingProposal {
     var hasExternalAttendees: Bool {
         (required + optional).contains(where: \.isExternal)
+    }
+}
+
+/// Lets a borderless window be dragged by its empty areas. Sits behind the content, so buttons
+/// and selectable text keep their clicks.
+private struct WindowDragArea: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { DragView() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    private final class DragView: NSView {
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+        override func mouseDown(with event: NSEvent) {
+            window?.performDrag(with: event)
+        }
     }
 }
