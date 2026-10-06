@@ -535,6 +535,90 @@ final class MCPCalendarToolsTests: XCTestCase {
         XCTAssertEqual(after?["ical_uid"], "UID-A")
     }
 
+    // MARK: - match_event
+
+    func testParticipantsPickTheRightOneOfParallelMeetings() async {
+        // Three meetings at 16:00, a recording from 16:28 for 93 minutes with known speakers.
+        let provider = DetailsProvider(account: exchange, attendeesByID: [
+            "ISCA": [EventAttendee(name: "Петров Пётр", email: "petrov@corp.ru", kind: .required, response: .accepted)],
+            "Back Leads": [
+                EventAttendee(name: "Аниканов Алексей", email: "anikanov@corp.ru", kind: .required, response: .accepted),
+                EventAttendee(name: "Федосеев Вадим", email: "fedoseev@corp.ru", kind: .required, response: .accepted),
+            ],
+            "English": [],
+        ])
+        let (tools, _) = makeTools(events: [
+            event("ISCA", day: 5, hour: 16, minutes: 30),
+            event("English", day: 5, hour: 16),
+            event("Back Leads", day: 5, hour: 16, minutes: 90),
+        ], provider: provider)
+
+        let result = await tools.call(name: "match_event", arguments: [
+            "start": "2026-10-05T16:28", "duration_minutes": 93,
+            "participants": ["Алексей Аниканов", "Федосеев Вадим"],
+        ]).structured
+
+        let best = result?["candidates"]?.arrayValue?.first
+        XCTAssertEqual(best?["title"], "Back Leads")
+        XCTAssertEqual(best?["matched_participants"], ["Алексей Аниканов", "Федосеев Вадим"])
+        XCTAssertEqual(result?["ambiguous"], false)
+        XCTAssertNotEqual(result?["confidence"], "low")
+    }
+
+    func testIdenticalParallelMeetingsAreAmbiguousWithoutMoreToGoOn() async {
+        let (tools, _) = makeTools(events: [
+            event("A", day: 5, hour: 16),
+            event("B", day: 5, hour: 16),
+        ])
+
+        let result = await tools.call(name: "match_event", arguments: ["start": "2026-10-05T16:00", "end": "2026-10-05T17:00"]).structured
+
+        XCTAssertEqual(result?["ambiguous"], true)
+        XCTAssertEqual(result?["candidates"]?.arrayValue?.count, 2)
+    }
+
+    func testNothingIsMatchedOutsideTheCalendarData() async {
+        let (tools, _) = makeTools(events: [event("old", day: 5, hour: 10)])
+
+        let result = await tools.call(name: "match_event", arguments: ["start": "2026-08-01T10:00"])
+        XCTAssertTrue(result.isError)
+        XCTAssertTrue(result.errorMessage?.contains("outside") == true)
+
+        let empty = await tools.call(name: "match_event", arguments: ["start": "2026-10-05T03:00"]).structured
+        XCTAssertEqual(empty?["confidence"], "none")
+        XCTAssertEqual(empty?["candidates"]?.arrayValue?.count, 0)
+    }
+
+    func testAttendeeListsAreLoadedForAFewLikelyMeetingsOnly() async {
+        let provider = DetailsProvider(account: exchange)
+        let events = (0..<8).map { event("m\($0)", day: 5, hour: 14) }
+        let (tools, _) = makeTools(events: events, provider: provider)
+
+        let result = await tools.call(name: "match_event", arguments: [
+            "start": "2026-10-05T14:00", "participants": ["Иванов"], "limit": 10,
+        ]).structured
+
+        let calls = await provider.detailCalls
+        XCTAssertEqual(calls.count, MCPCalendarTools.matchAttendeeLoads)
+        let unknown = result?["candidates"]?.arrayValue?.filter { $0["attendees_unknown"] == true }.count
+        XCTAssertEqual(unknown, 8 - MCPCalendarTools.matchAttendeeLoads)
+    }
+
+    func testMatchEventRejectsConflictingArguments() async {
+        let (tools, _) = makeTools(events: [])
+        let broken: [[String: JSONValue]] = [
+            [:],
+            ["start": "2026-10-05"],
+            ["start": "2026-10-05T10:00", "end": "2026-10-05T11:00", "duration_minutes": 60],
+            ["start": "2026-10-05T10:00", "end": "2026-10-05T09:00"],
+            ["start": "2026-10-05T10:00", "participants": "Иванов"],
+        ]
+        for arguments in broken {
+            let result = await tools.call(name: "match_event", arguments: arguments)
+            XCTAssertTrue(result.isError, "\(arguments)")
+        }
+    }
+
     // MARK: - get_event_details
 
     func testEventDetailsLoadOnceThenComeFromCache() async throws {

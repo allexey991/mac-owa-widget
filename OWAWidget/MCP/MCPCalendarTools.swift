@@ -1,7 +1,8 @@
 import Foundation
 
-/// The MCP tools, implemented over `CalendarService`: six that read the calendar, `find_people`
-/// and `create_meeting`.
+/// The MCP tools, implemented over `CalendarService`: those that read the calendar (including
+/// `match_event`, which tells which meeting a time was), `find_people`, `find_free_slots` and
+/// `create_meeting`.
 ///
 /// The calendar tools read the in-memory calendar: no network, no load on Exchange, except for
 /// meeting details. Data is limited to the sync window (start of day -7 days ... now +30 days), and every
@@ -89,6 +90,7 @@ final class MCPCalendarTools {
             case "get_event_details": return try await getEventDetails(arguments, context)
             case "find_people": return try await findPeople(arguments, context)
             case "find_free_slots": return try await findFreeSlots(arguments, context)
+            case "match_event": return try await matchEvent(arguments, context)
             case "create_meeting": return try await createMeeting(arguments, context, client: client)
             default: return .failure("Unknown tool: \(name)")
             }
@@ -1045,6 +1047,126 @@ final class MCPCalendarTools {
         case available(attendees: [EventAttendee], body: String?, source: String)
         /// `stop`: no further detail requests should be attempted in this call.
         case unavailable(reason: String, stop: Bool)
+    }
+
+    // MARK: - match_event
+
+    /// Exchange attendee lists are loaded for at most this many candidates, best by time first.
+    static let matchAttendeeLoads = 5
+    static let maxMatchParticipants = 30
+
+    private func matchEvent(_ arguments: [String: JSONValue], _ context: CallContext) async throws -> MCPToolResult {
+        let start = try requiredDateTime(arguments, "start", context)
+        let hasEnd = arguments["end"].map { $0 != .null } ?? false
+        let duration = try optionalInt(arguments, "duration_minutes", range: 1...1440)
+        guard !(hasEnd && duration != nil) else { throw ArgumentError("Pass `end` or `duration_minutes`, not both") }
+        var end = start
+        if hasEnd {
+            end = try requiredDateTime(arguments, "end", context)
+            guard end > start else { throw ArgumentError("`end` must be later than `start`") }
+            guard end.timeIntervalSince(start) <= 24 * 3600 else { throw ArgumentError("The interval can be at most 24 hours") }
+        } else if let duration {
+            end = start.addingTimeInterval(TimeInterval(duration * 60))
+        }
+        let participants = try nameList(arguments, "participants")
+        let hint = arguments["title_hint"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let accountID = try optionalAccountID(arguments)
+        let limit = try optionalInt(arguments, "limit", range: 1...10) ?? 3
+
+        let coverage = try requireCoverage()
+        guard start < coverage.end, end >= coverage.start else {
+            return .failure(
+                "\(context.coder.string(start)) is outside the calendar data OWA Widget holds (\(context.coder.string(coverage.start)) to \(context.coder.string(coverage.end))). Nothing can be matched there; do not guess."
+            )
+        }
+
+        let events = calendarService.events.filter { accountID == nil || $0.accountID == accountID }
+        let byTime = MeetingMatchScorer.candidates(events, start: start, end: end)
+            .map { (event: $0, time: MeetingMatchScorer.timeScore(event: $0, start: start, end: end)) }
+            .sorted { $0.time > $1.time }
+
+        // Attendees: free where already known, a request each for the likeliest Exchange meetings.
+        var attendees: [String: [EventAttendee]] = [:]
+        var attendeesNote: String?
+        if !participants.isEmpty {
+            var loads = 0
+            for candidate in byTime {
+                let event = candidate.event
+                if let known = localAttendees(event) {
+                    attendees[event.id] = known
+                    continue
+                }
+                guard attendeesNote == nil, loads < Self.matchAttendeeLoads, needsNetworkForAttendees(event) else { continue }
+                loads += 1
+                switch await loadAttendeesAndBody(event) {
+                case .available(let list, _, _):
+                    attendees[event.id] = list
+                case .unavailable(let reason, let stop):
+                    if stop { attendeesNote = reason }
+                }
+            }
+        }
+
+        let scored = byTime.map { candidate -> (event: CalendarEvent, score: Double, match: MeetingMatchScorer.ParticipantMatch?, title: Double?) in
+            let event = candidate.event
+            let match = attendees[event.id].map {
+                MeetingMatchScorer.matchParticipants(participants, attendees: $0, organizer: event.organizer)
+            }
+            let participantScore = match.flatMap { match -> Double? in
+                let total = match.matched.count + match.unmatched.count
+                return total > 0 ? Double(match.matched.count) / Double(total) : nil
+            }
+            let title = hint.flatMap { MeetingMatchScorer.titleScore(hint: $0, title: event.title) }
+            let components = MeetingMatchScorer.Components(time: candidate.time, participants: participantScore, title: title)
+            return (event, MeetingMatchScorer.score(components, event: event), match, title)
+        }
+        .sorted { ($0.score, $1.event.startDate) > ($1.score, $0.event.startDate) }
+
+        let verdict = MeetingMatchScorer.confidence(scores: scored.map(\.score))
+        var result = commonFields(context)
+        result["interval"] = [
+            "start": .string(context.coder.string(start)),
+            "end": .string(context.coder.string(end)),
+        ]
+        result["candidates"] = .array(scored.prefix(limit).map { candidate in
+            var fields = eventFields(candidate.event, context)
+            fields["score"] = .double(candidate.score)
+            fields["overlap_minutes"] = .int(Int64(MeetingMatchScorer.overlapMinutes(event: candidate.event, start: start, end: end)))
+            fields["start_offset_minutes"] = .int(Int64((candidate.event.startDate.timeIntervalSince(start) / 60).rounded()))
+            if !participants.isEmpty {
+                if let match = candidate.match {
+                    fields["matched_participants"] = .array(match.matched.map(JSONValue.string))
+                    fields["unmatched_participants"] = .array(match.unmatched.map(JSONValue.string))
+                } else {
+                    fields["attendees_unknown"] = true
+                }
+            }
+            if let title = candidate.title { fields["title_match"] = .double((title * 100).rounded() / 100) }
+            return .object(fields)
+        })
+        result["total_candidates"] = .int(Int64(scored.count))
+        result["confidence"] = .string(scored.isEmpty ? "none" : verdict.confidence.rawValue)
+        result["ambiguous"] = .bool(verdict.ambiguous)
+        if let attendeesNote { result["attendees_note"] = .string(attendeesNote) }
+        return .success(result)
+    }
+
+    /// Names or addresses, de-duplicated, at most `maxMatchParticipants`.
+    private func nameList(_ arguments: [String: JSONValue], _ key: String) throws -> [String] {
+        guard let value = arguments[key], value != .null else { return [] }
+        guard let array = value.arrayValue else { throw ArgumentError("`\(key)` must be an array of names or email addresses") }
+        var seen = Set<String>()
+        var names: [String] = []
+        for item in array {
+            guard let text = item.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) else {
+                throw ArgumentError("`\(key)` must hold names or email addresses, got \(item)")
+            }
+            if !text.isEmpty, seen.insert(text.lowercased()).inserted { names.append(text) }
+        }
+        guard names.count <= Self.maxMatchParticipants else {
+            throw ArgumentError("At most \(Self.maxMatchParticipants) names in `\(key)`")
+        }
+        return names
     }
 
     /// Attendees known without a request: EventKit events arrive with them, Exchange ones only
