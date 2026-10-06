@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="robots" content="noindex"><title>AI assistant mockup</title>
+<link rel="stylesheet" href="mock.css">
+<style>
+body{width:1080px;height:520px}.stage{width:100%;height:100%;display:block}
+/* A neutral chat: no particular assistant, just the conversation that leads to the panel. */
+.chat{position:absolute;left:24px;top:30px;width:620px;height:450px}
+.chat-body{flex:1;padding:22px 64px 22px 24px;display:flex;flex-direction:column;gap:16px;overflow:hidden}
+.me{align-self:flex-end;max-width:440px;background:var(--accent);color:#fff;font-size:13.5px;line-height:1.45;padding:10px 14px;border-radius:16px 16px 4px 16px}
+.bot{display:flex;gap:10px;max-width:520px}
+.bot .av{width:28px;height:28px;border-radius:50%;flex:none;display:grid;place-items:center;background:color-mix(in srgb,var(--fg) 10%,transparent)}
+.bot .msg{display:flex;flex-direction:column;gap:8px;font-size:13.5px;line-height:1.45}
+.tool{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--fg2);padding:5px 9px;border-radius:7px;
+  background:color-mix(in srgb,var(--fg) 6%,transparent);font-family:ui-monospace,"SF Mono",Menlo,monospace;align-self:flex-start}
+.tool b{color:var(--fg);font-weight:500}
+.composer{margin:0 18px 18px;padding:10px 12px;border-radius:12px;background:var(--ctl);box-shadow:inset 0 0 0 .5px var(--sep);
+  font-size:13px;color:var(--fg3);display:flex;align-items:center}
+/* Mirrors MCPMeetingConfirmationView: 420pt wide, header, meeting, attendees, agenda, countdown, footer. */
+.confirm{position:absolute;left:600px;top:62px;width:420px;background:var(--win);border-radius:12px;overflow:hidden;
+  box-shadow:0 18px 40px -10px rgba(0,0,0,.45),0 0 0 1px color-mix(in srgb,var(--accent) 30%,transparent)}
+.c-in{padding:16px;display:flex;flex-direction:column;gap:12px}
+.c-head{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--fg2)}
+.c-title{font-size:15px;font-weight:600}
+.c-line{font-size:12px}
+.c-sub{font-size:12px;color:var(--fg2);font-variant-numeric:tabular-nums}
+.c-lbl{font-size:11px;font-weight:500;color:var(--fg2)}
+.c-person{display:flex;gap:6px;font-size:12px;align-items:baseline}
+.c-person i{font-style:normal;font-size:11px;color:var(--fg2)}
+.c-agenda{font-size:12px;line-height:1.4;padding:8px;border-radius:6px;background:color-mix(in srgb,var(--fg) 5%,transparent)}
+.c-bar{height:2px;background:color-mix(in srgb,var(--fg) 8%,transparent)}
+.c-bar i{display:block;height:100%;width:82%;background:color-mix(in srgb,var(--fg2) 70%,transparent)}
+.c-foot{display:flex;align-items:center;gap:10px;padding:10px 16px}
+.c-edit{font-size:13px;color:var(--accent)}
+</style>
+</head><body><div class="stage" id="s"></div>
+<script src="mock.js"></script>
+<script>
+const olga = PEOPLE.olga, dmitry = PEOPLE.dmitry;
+const mail = (ru, en) => L(ru, en) + '@company.com';
+document.getElementById('s').innerHTML = `
+<div class="window chat">
+  <div class="titlebar"><div class="traffic"><i></i><i></i><i></i></div></div>
+  <div class="divider"></div>
+  <div class="chat-body">
+    <div class="me">${L('Найди час на следующей неделе для меня, Ольги Васильевой и Дмитрия Орлова и поставь «Синк по релизу 1.3»',
+      `Find an hour next week for me, ${olga} and ${dmitry}, and set up “Release 1.3 sync”`)}</div>
+    <div class="bot">
+      <span class="av">${icon('sparkles', 14, 'var(--fg2)')}</span>
+      <div class="msg">
+        <span class="tool">${icon('people', 12, 'var(--fg2)')}find_people · <b>${L('2 человека', '2 people')}</b></span>
+        <span class="tool">${icon('calendar', 12, 'var(--fg2)')}find_free_slots · <b>${L('5 вариантов', '5 options')}</b></span>
+        <span>${L('Все трое свободны во вторник с 14:00 до 15:00 — это первый общий час на неделе. Отправил встречу вам на подтверждение в OWA Widget.',
+          'All three of you are free on Tuesday, 14:00–15:00 — the first shared hour that week. I’ve sent the meeting to OWA Widget for you to confirm.')}</span>
+        <span class="tool">${icon('calendar', 12, 'var(--accent)')}create_meeting · <b>${L('ждёт подтверждения', 'waiting for you')}</b></span>
+      </div>
+    </div>
+  </div>
+  <div class="composer">${L('Спросите про своё расписание…', 'Ask about your schedule…')}</div>
+</div>
+
+<div class="confirm">
+  <div class="c-in">
+    <div class="c-head">${icon('calendar', 15, 'var(--accent)')}<span class="spacer">${L('AI-ассистент просит создать встречу', 'An AI assistant wants to create a meeting')}</span>
+      <span style="font-size:11px;font-weight:400" class="tnum">${L('Осталось 37 с', '37 s left')}</span></div>
+    <div class="col" style="gap:3px">
+      <span class="c-title">${L('Синк по релизу 1.3', 'Release 1.3 sync')}</span>
+      <span class="c-line">${L('Вторник, 13 октября', 'Tuesday, October 13')}</span>
+      <span class="c-sub">${L('14:00–15:00 · 60 минут', '14:00–15:00 · 60 minutes')}</span>
+    </div>
+    <div class="col" style="gap:4px">
+      <span class="c-lbl">${L('Обязательные', 'Required')}</span>
+      <span class="c-person">${olga}<i>${mail('o.vasilieva', 'g.miller')}</i></span>
+      <span class="c-person">${dmitry}<i>${mail('d.orlov', 'n.bennett')}</i></span>
+    </div>
+    <div class="col" style="gap:4px">
+      <span class="c-lbl">${L('Описание — его получат участники', 'Description, sent to the attendees')}</span>
+      <div class="c-agenda">${L('Что входит в 1.3, кто что проверяет, дата выкладки.', 'What goes into 1.3, who checks what, the release date.')}</div>
+    </div>
+  </div>
+  <div class="c-bar"><i></i></div>
+  <div class="c-foot">
+    <span class="c-edit">${L('Изменить…', 'Edit…')}</span><span class="spacer"></span>
+    <span class="btn">${L('Отменить', 'Cancel')}</span>
+    <span class="btn primary">${L('Отправить приглашения', 'Send Invitations')}</span>
+  </div>
+</div>`;
+</script>
+</body></html>

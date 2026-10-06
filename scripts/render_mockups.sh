@@ -26,6 +26,8 @@ PAGES=(
   "create-meeting:1080:760:en ru:light"
   "menubar:1100:530:en ru:light"
   "settings:1080:700:en ru:light"
+  "assistant:1080:520:en ru"
+  "assistant:1080:520:en ru:light"
   "hero:1280:640:en ru"
   "hero:1280:640:en ru:light"
 )

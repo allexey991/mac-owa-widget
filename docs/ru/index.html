@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>OWA Widget — календарь Exchange / Outlook в строке меню macOS</title>
-<meta name="description" content="Приложение для строки меню macOS: встречи из Microsoft Exchange / OWA, Google и iCloud и подключение к Teams, Zoom, Webex, Google Meet в один клик.">
+<meta name="description" content="Приложение для строки меню macOS: встречи из Microsoft Exchange / OWA, Google и iCloud, подключение к Teams, Zoom, Webex, Google Meet в один клик и MCP-сервер для AI-ассистентов.">
 <link rel="canonical" href="https://ilyabazhenov.github.io/mac-owa-widget/ru/">
 <link rel="alternate" hreflang="en" href="https://ilyabazhenov.github.io/mac-owa-widget/">
 <link rel="alternate" hreflang="ru" href="https://ilyabazhenov.github.io/mac-owa-widget/ru/">
@@ -230,6 +230,38 @@
     </div>
   </section>
 
+  <!-- 14:30 AI assistant -->
+  <section class="slot" id="assistant" data-t="14:30">
+    <div class="time"><span class="t">14:30</span></div>
+    <div class="body">
+      <div class="wide-head">
+        <div>
+          <span class="evt">14:30–14:35 · AI-ассистент</span>
+          <h2>Спросите ассистента про свой день. <em>Решать всё равно вам.</em></h2>
+        </div>
+        <div>
+          <p class="lead">OWA Widget подключается к AI-ассистентам по протоколу MCP. Ассистент видит ваши встречи, ищет коллег в адресной книге Exchange и свободное время, а встречу создаёт только после вашего подтверждения в окне приложения.</p>
+          <ul class="facts">
+            <li>По умолчанию только чтение; создание встреч включается отдельно</li>
+            <li>Каждая встреча — в окне подтверждения: «Отправить», «Отменить» или «Изменить…» в обычном окне создания</li>
+            <li>Ассистент знает, кто вы, и отличает вас от тёзок</li>
+            <li>Подключение — строка из настроек приложения, готовая для популярных MCP-клиентов</li>
+          </ul>
+        </div>
+      </div>
+      <figure>
+        <img class="only-light" src="../images/assistant-light-ru.webp" width="2160" height="1040" alt="Ассистент находит общий свободный час и отправляет встречу на подтверждение в окно OWA Widget" loading="lazy"><img class="only-dark" src="../images/assistant-ru.webp" width="2160" height="1040" alt="Ассистент находит общий свободный час и отправляет встречу на подтверждение в окно OWA Widget" loading="lazy">
+      </figure>
+      <ul class="asks" aria-label="Примеры вопросов">
+        <li>Что у меня завтра до обеда?</li>
+        <li>Когда я последний раз встречался с Орловым?</li>
+        <li>Найди час на следующей неделе для меня, Ольги и Дмитрия</li>
+        <li>Сколько часов ушло на созвоны на этой неделе?</li>
+        <li>Какая встреча была вчера в 16:30?</li>
+      </ul>
+    </div>
+  </section>
+
   <!-- 16:00 Search & colleagues -->
   <section class="slot" data-t="16:00">
     <div class="time"><span class="t">16:00</span></div>
@@ -287,6 +319,7 @@
         <div><b>Лог без личного</b>
           <p>Диагностический лог лежит у вас на Mac и не содержит названий встреч, адресов и паролей.</p></div>
       </div>
+      <p class="aside">AI-ассистент выключен, пока вы его не включите. Включили — названия, места и описания встреч, имена и адреса участников уходят тому AI-сервису, которым вы пользуетесь. Проверьте, разрешает ли это политика вашей компании.</p>
     </div>
   </section>
 
@@ -339,6 +372,14 @@
         <details>
           <summary>Почему у встречи нет кнопки подключения?</summary>
           <p>Кнопка появляется, когда в поле онлайн-встречи, месте или описании есть ссылка на звонок. Проверьте, что организатор её добавил.</p>
+        </details>
+        <details>
+          <summary>Как подключить AI-ассистента?</summary>
+          <p>В «Настройках» → «AI (MCP)» включите доступ и скопируйте готовую строку подключения для своего MCP-клиента. Ассистент видит встречи за последние 7 дней и на 30 дней вперёд. Создавать встречи он сможет, только если включить это отдельным переключателем, и каждую вы подтверждаете в окне приложения.</p>
+        </details>
+        <details>
+          <summary>Куда уходят данные, если подключить ассистента?</summary>
+          <p>Само приложение никуда их не отправляет: ассистент получает данные через локальное соединение на вашем Mac. Но то, что ассистент прочитал, — названия, описания и участники встреч — уходит AI-сервису, которым вы пользуетесь. Пока доступ выключен, ассистент не видит ничего.</p>
         </details>
         <details>
           <summary>Что-то не работает — что прислать?</summary>

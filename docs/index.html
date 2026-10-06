@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>OWA Widget — Exchange &amp; Outlook calendar in the macOS menu bar</title>
-<meta name="description" content="A macOS menu bar app: meetings from Microsoft Exchange / OWA, Google and iCloud, and one-click join for Teams, Zoom, Webex and Google Meet.">
+<meta name="description" content="A macOS menu bar app: meetings from Microsoft Exchange / OWA, Google and iCloud, one-click join for Teams, Zoom, Webex and Google Meet, and an MCP server for AI assistants.">
 <link rel="canonical" href="https://ilyabazhenov.github.io/mac-owa-widget/">
 <meta name="google-site-verification" content="Cx-lKp-MVBxipIEDuS_amiiELlxAJ0gDqKOZgYpGUCo">
 <link rel="alternate" hreflang="en" href="https://ilyabazhenov.github.io/mac-owa-widget/">
@@ -236,6 +236,38 @@
     </div>
   </section>
 
+  <!-- 14:30 AI assistant -->
+  <section class="slot" id="assistant" data-t="14:30">
+    <div class="time"><span class="t">14:30</span></div>
+    <div class="body">
+      <div class="wide-head">
+        <div>
+          <span class="evt">14:30–14:35 · AI assistant</span>
+          <h2>Ask your assistant about your day. <em>You still make the call.</em></h2>
+        </div>
+        <div>
+          <p class="lead">OWA Widget connects to AI assistants over MCP. The assistant sees your meetings, finds colleagues in the Exchange address book and free time, and creates a meeting only after you confirm it in the app's own window.</p>
+          <ul class="facts">
+            <li>Read-only by default; creating meetings is a separate switch</li>
+            <li>Every meeting goes through a confirmation window: Send, Cancel, or Edit in the regular New Meeting window</li>
+            <li>The assistant knows who you are and tells you apart from namesakes</li>
+            <li>Setup is a line from the app's settings, ready for popular MCP clients</li>
+          </ul>
+        </div>
+      </div>
+      <figure>
+        <img class="only-light" src="images/assistant-light-en.webp" width="2160" height="1040" alt="The assistant finds a shared free hour and sends the meeting to OWA Widget for confirmation" loading="lazy"><img class="only-dark" src="images/assistant-en.webp" width="2160" height="1040" alt="The assistant finds a shared free hour and sends the meeting to OWA Widget for confirmation" loading="lazy">
+      </figure>
+      <ul class="asks" aria-label="Example questions">
+        <li>What's on my plate tomorrow morning?</li>
+        <li>When did I last meet with Liam?</li>
+        <li>Find an hour next week for me, Grace and Noah</li>
+        <li>How many hours did I spend in calls this week?</li>
+        <li>Which meeting was I in yesterday at 4:30 PM?</li>
+      </ul>
+    </div>
+  </section>
+
   <!-- 16:00 Search & colleagues -->
   <section class="slot" data-t="16:00">
     <div class="time"><span class="t">16:00</span></div>
@@ -293,6 +325,7 @@
         <div><b>A log with nothing personal</b>
           <p>The diagnostic log stays on your Mac and holds no meeting titles, addresses or passwords.</p></div>
       </div>
+      <p class="aside">The AI assistant stays off until you turn it on. Once it is on, meeting titles, locations and descriptions and attendee names and addresses go to the AI service you use. Check that your company's policy allows it.</p>
     </div>
   </section>
 
@@ -345,6 +378,14 @@
         <details>
           <summary>Why is there no Join button?</summary>
           <p>The button appears when the online meeting field, location or description contains a call link. Check that the organizer added one.</p>
+        </details>
+        <details>
+          <summary>How do I connect an AI assistant?</summary>
+          <p>In Settings → “AI (MCP)”, turn access on and copy the ready-made connection line for your MCP client. The assistant sees meetings from the last 7 days and the next 30. It can create meetings only if you turn that on with a separate switch, and you confirm each one in the app's window.</p>
+        </details>
+        <details>
+          <summary>Where does my data go if I connect an assistant?</summary>
+          <p>The app itself sends it nowhere: the assistant reads it over a local connection on your Mac. But what the assistant reads — meeting titles, descriptions and attendees — goes to the AI service you use. While access is off, the assistant sees nothing.</p>
         </details>
         <details>
           <summary>Something is broken — what should I send?</summary>

@@ -76,6 +76,22 @@ Add people from the Exchange address book and the grid shows everyone's week, wh
 - Required and optional attendees; frequent contacts are one click away.
 - Book time just for yourself, without attendees. Open the window with **+** or **Ctrl+Option+N**.
 
+`14:30–14:35 · AI assistant`
+
+### Ask your assistant about your day. You still make the call.
+
+OWA Widget connects to AI assistants over MCP. The assistant sees your meetings, finds colleagues in the Exchange address book and free time, and creates a meeting only after you confirm it in the app's own window.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/assistant-en.png">
+  <img src="docs/images/assistant-light-en.png" alt="The assistant finds a shared free hour and sends the meeting to OWA Widget for confirmation">
+</picture>
+
+- Read-only by default; creating meetings is a separate switch.
+- Every meeting goes through a confirmation window: **Send**, **Cancel**, or **Edit** in the regular New Meeting window.
+- The assistant knows who you are and tells you apart from namesakes.
+- Turn it on in **Settings → AI (MCP)** and copy the ready-made connection line for your MCP client.
+
 `16:00–16:15 · search`
 
 ### Where was that meeting about the budget?
@@ -122,6 +138,7 @@ Several Exchange / OWA servers, including ones behind Windows single sign-on, an
 - **Only your server.** Credentials go where you pointed them; a sign-in redirected elsewhere needs your confirmation.
 - **HTTPS and certificate pinning.** A changed certificate shows the old and new fingerprints, so a renewal can be told from an intercept.
 - **A log with nothing personal.** The diagnostic log stays on your Mac and holds no meeting titles, addresses, passwords or server responses.
+- **AI assistant only when you turn it on.** Once it is on, meeting titles, locations, descriptions and attendees go to the AI service you use; check that your company's policy allows it.
 
 ---
 
@@ -179,6 +196,9 @@ If Exchange is only reachable from the corporate network, yes: the app needs the
 
 **Why is there no Join button for a meeting?**
 The button appears when the online meeting field, location or description contains a call link. Check that the organizer added one.
+
+**Where does my data go if I connect an AI assistant?**
+The app itself sends it nowhere: the assistant reads it over a local connection on your Mac. What the assistant reads — meeting titles, descriptions and attendees — goes to the AI service you use. While access is off, the assistant sees nothing.
 
 **Why does macOS ask for access to the Keychain?**
 The account passwords and the key that encrypts app data live in the Keychain. macOS asks when an app with a different signature reads them, for example the first time after updating from a version released before the app was signed with a Developer ID. Click **Always Allow**: plain **Allow** lets the app in for this launch only, and the question comes back next time.
