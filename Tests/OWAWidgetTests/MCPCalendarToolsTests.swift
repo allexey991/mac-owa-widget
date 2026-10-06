@@ -645,6 +645,33 @@ final class MCPCalendarToolsTests: XCTestCase {
         XCTAssertEqual(lookups, 1)
     }
 
+    func testOwnDomainLookupFailureIsRetriedAfterAMinuteNotTen() async {
+        var current = now
+        let provider = DetailsProvider(account: exchange, people: [partner], ownEmailError: URLError(.timedOut))
+        let service = CalendarService(
+            providers: [provider],
+            notificationService: SilentNotificationService(),
+            customMeetingReminders: SilentMeetingReminderController(),
+            loadPersistedAccounts: false,
+            startBackgroundTasks: false,
+            clock: { [now] in now }
+        )
+        service.replaceAccountsForTests([exchange])
+        service.setEventCoverageForTests(EventCoverage(start: date(1, 0), end: date(30, 0), refreshedAt: now))
+        let tools = MCPCalendarTools(calendarService: service, clock: { current }, timeZone: { [zone] in zone })
+
+        _ = await tools.call(name: "find_people", arguments: ["query": "Partner"])
+        current = now.addingTimeInterval(30)
+        _ = await tools.call(name: "find_people", arguments: ["query": "Partner"])
+        var lookups = await provider.ownEmailCalls
+        XCTAssertEqual(lookups, 1)
+
+        current = now.addingTimeInterval(61)
+        _ = await tools.call(name: "find_people", arguments: ["query": "Partner"])
+        lookups = await provider.ownEmailCalls
+        XCTAssertEqual(lookups, 2)
+    }
+
     func testFindPeopleBudgetCountsEveryRequestItMayMake() {
         XCTAssertEqual(MCPCalendarTools.findPeopleRequestCost("Иванов"), 1)
         XCTAssertEqual(MCPCalendarTools.findPeopleRequestCost("Иван Иванов"), 3)

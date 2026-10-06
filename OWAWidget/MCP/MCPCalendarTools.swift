@@ -22,8 +22,11 @@ final class MCPCalendarTools {
     /// anyway: the panel's 45 seconds and this must fit in the client's 60.
     static let ownDomainWaitForCreate: TimeInterval = 5
     static let ownDomainWaitForSearch: TimeInterval = 20
-    /// A failed lookup is not repeated on every call.
+    /// The address book does not know the user's address: asking again soon will not help.
     static let ownDomainRetryInterval: TimeInterval = 10 * 60
+    /// The lookup failed (no network, VPN down): retry soon, or the domain stays "unknown" for
+    /// minutes after the connection is back.
+    static let ownDomainErrorRetryInterval: TimeInterval = 60
 
     private let calendarService: CalendarService
     private let accessGuard: MCPAccessGuard
@@ -37,9 +40,9 @@ final class MCPCalendarTools {
     /// Names seen next to addresses in `find_people` answers, for the confirmation panel.
     private var namesByEmail: [String: String] = [:]
     private var recentCreations: [String: (date: Date, result: [String: JSONValue])] = [:]
-    /// The user's own mail domain per account; `nil` domain is a failed lookup, kept for
-    /// `ownDomainRetryInterval`.
-    private var ownDomains: [UUID: (domain: String?, checkedAt: Date)] = [:]
+    /// The user's own mail domain per account; a `nil` domain is a failed lookup, not repeated
+    /// before `retryAfter`.
+    private var ownDomains: [UUID: (domain: String?, retryAfter: Date)] = [:]
     private var ownDomainLookups: [UUID: Task<String?, Never>] = [:]
     private var isCreatingMeeting = false
 
@@ -784,8 +787,7 @@ final class MCPCalendarTools {
     /// The user's own mail domain, waiting at most `wait` for a lookup in flight. A lookup that
     /// outlives the wait keeps running and fills the cache for the next call.
     private func ownMailDomain(_ account: CalendarAccount, wait: TimeInterval) async -> String? {
-        if let cached = ownDomains[account.id],
-           cached.domain != nil || clock().timeIntervalSince(cached.checkedAt) < Self.ownDomainRetryInterval {
+        if let cached = ownDomains[account.id], cached.domain != nil || clock() < cached.retryAfter {
             return cached.domain
         }
         let lookup = ownDomainLookups[account.id] ?? startOwnDomainLookup(account)
@@ -814,11 +816,11 @@ final class MCPCalendarTools {
             defer { accessGuard.releaseSlot() }
             do {
                 let domain = try await calendarService.ownEmail(accountID: account.id).flatMap(Self.domain(of:))
-                ownDomains[account.id] = (domain, clock())
+                ownDomains[account.id] = (domain, clock().addingTimeInterval(Self.ownDomainRetryInterval))
                 return domain
             } catch {
                 accessGuard.report(error, context: "mcp.ownEmail")
-                ownDomains[account.id] = (nil, clock())
+                ownDomains[account.id] = (nil, clock().addingTimeInterval(Self.ownDomainErrorRetryInterval))
                 return nil
             }
         }
