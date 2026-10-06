@@ -1409,6 +1409,7 @@ final class MCPCalendarTools {
     static func accountTypeName(_ type: AccountType) -> String {
         switch type {
         case .owa: "exchange"
+        case .eas: "eas"
         case .eventKit: "macos_calendar"
         case .googleCalendar: "google_calendar"
         }
