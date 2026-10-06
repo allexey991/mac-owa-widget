@@ -78,7 +78,7 @@ Add people from the Exchange address book and the grid shows everyone's week, wh
 
 `14:30–14:35 · AI assistant`
 
-### Ask your assistant about your day. You still make the call.
+### Ask your AI assistant about your day. You still make the call.
 
 OWA Widget connects to AI assistants over MCP. The assistant sees your meetings, finds colleagues in the Exchange address book and free time, and creates a meeting only after you confirm it in the app's own window.
 
