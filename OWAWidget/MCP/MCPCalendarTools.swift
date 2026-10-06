@@ -647,37 +647,38 @@ final class MCPCalendarTools {
 
     // MARK: - find_people
 
+    static let maxPeopleQueries = 10
+
     private func findPeople(_ arguments: [String: JSONValue], _ context: CallContext) async throws -> MCPToolResult {
-        let query = arguments["query"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard query.count >= 2 else {
-            throw ArgumentError("`query` needs at least 2 characters: a name, a surname or an email address")
-        }
+        let (queries, isBatch) = try peopleQueries(arguments)
         let limit = try optionalInt(arguments, "limit", range: 1...25) ?? 10
         let account = try exchangeAccount(arguments)
 
-        if let denial = accessGuard.permitRequest(count: Self.findPeopleRequestCost(query)) {
+        // The whole batch is paid for up front: a half-done batch would leave the model guessing
+        // which names were never looked up.
+        let cost = queries.reduce(0) { $0 + Self.findPeopleRequestCost($1) }
+        if let denial = accessGuard.permitRequest(count: cost) {
             return .failure(denial.message)
         }
-        let people: [ResolvedAttendee]
-        do {
-            await accessGuard.acquireSlot()
-            defer { accessGuard.releaseSlot() }
-            people = try await calendarService.findPeople(query: query, accountID: account.id)
-        } catch {
-            accessGuard.report(error, context: "mcp.findPeople")
-            if let reason = MCPAccessGuard.blockReason(calendarService.syncStatus) {
-                return .failure(reason)
+        var outcomes: [(query: String, people: [ResolvedAttendee]?, error: String?)] = []
+        for query in queries {
+            do {
+                await accessGuard.acquireSlot()
+                defer { accessGuard.releaseSlot() }
+                let people = try await calendarService.findPeople(query: query, accountID: account.id)
+                outcomes.append((query, people, nil))
+            } catch {
+                accessGuard.report(error, context: "mcp.findPeople")
+                if let reason = MCPAccessGuard.blockReason(calendarService.syncStatus) {
+                    return .failure(reason)
+                }
+                outcomes.append((query, nil, "Address book search failed: \(error.localizedDescription)"))
             }
-            return .failure("Address book search failed: \(error.localizedDescription)")
         }
 
         let own = await ownAddress(account, wait: Self.ownDomainWaitForSearch)
         let ownDomain = own.flatMap(Self.domain(of:))
-        for person in people where !person.displayName.isEmpty {
-            namesByEmail[person.email.lowercased()] = person.displayName
-        }
-        var result = commonFields(context)
-        result["people"] = .array(people.prefix(limit).map { person in
+        let personJSON = { (person: ResolvedAttendee) -> JSONValue in
             var fields: [String: JSONValue] = [
                 "name": .string(person.displayName),
                 "email": .string(person.email),
@@ -692,10 +693,62 @@ final class MCPCalendarTools {
                 fields["job_title"] = .string(title)
             }
             return .object(fields)
+        }
+        for person in outcomes.flatMap({ $0.people ?? [] }) where !person.displayName.isEmpty {
+            namesByEmail[person.email.lowercased()] = person.displayName
+        }
+
+        var result = commonFields(context)
+        if !isBatch, let single = outcomes.first {
+            guard let people = single.people else { return .failure(single.error ?? "Address book search failed") }
+            result["people"] = .array(people.prefix(limit).map(personJSON))
+            result["total"] = .int(Int64(people.count))
+            result["truncated"] = .bool(people.count > limit)
+            return .success(result)
+        }
+        result["results"] = .array(outcomes.map { outcome in
+            var group: [String: JSONValue] = ["query": .string(outcome.query)]
+            if let people = outcome.people {
+                group["people"] = .array(people.prefix(limit).map(personJSON))
+                group["total"] = .int(Int64(people.count))
+                group["truncated"] = .bool(people.count > limit)
+            } else {
+                group["error"] = .string(outcome.error ?? "Address book search failed")
+            }
+            return .object(group)
         })
-        result["total"] = .int(Int64(people.count))
-        result["truncated"] = .bool(people.count > limit)
         return .success(result)
+    }
+
+    /// `query` or `queries`, exactly one; `queries` comes back de-duplicated, in order.
+    private func peopleQueries(_ arguments: [String: JSONValue]) throws -> (queries: [String], isBatch: Bool) {
+        let hasQuery = arguments["query"].map { $0 != .null } ?? false
+        let hasQueries = arguments["queries"].map { $0 != .null } ?? false
+        guard hasQuery != hasQueries else {
+            throw ArgumentError("Pass either `query` (one name) or `queries` (several), not both and not neither")
+        }
+        let tooShort = "needs at least 2 characters: a name, a surname or an email address"
+        if hasQuery {
+            let query = arguments["query"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard query.count >= 2 else { throw ArgumentError("`query` \(tooShort)") }
+            return ([query], false)
+        }
+        guard let array = arguments["queries"]?.arrayValue else {
+            throw ArgumentError("`queries` must be an array of names or email addresses")
+        }
+        var seen = Set<String>()
+        var queries: [String] = []
+        for item in array {
+            guard let text = item.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines), text.count >= 2 else {
+                throw ArgumentError("Every item of `queries` \(tooShort), got \(item)")
+            }
+            if seen.insert(text.lowercased()).inserted { queries.append(text) }
+        }
+        guard !queries.isEmpty else { throw ArgumentError("`queries` is empty") }
+        guard queries.count <= Self.maxPeopleQueries else {
+            throw ArgumentError("At most \(Self.maxPeopleQueries) names per call, got \(queries.count)")
+        }
+        return (queries, true)
     }
 
     // MARK: - create_meeting

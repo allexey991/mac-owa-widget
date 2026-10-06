@@ -117,15 +117,21 @@ enum MCPToolRegistry {
         MCPToolDefinition(
             name: "find_people",
             title: "Find people",
-            description: "Searches the Exchange address book (people in the user's organization) by name, surname or email. Returns name, email, job title, `external` (outside the user's mail domain; null when that domain is unknown) and `is_you: true` on the user's own entry. Use it to get attendee addresses for create_meeting. Makes a request to Exchange.",
+            description: "Searches the Exchange address book (people in the user's organization) by name, surname or email. Returns name, email, job title, `external` (outside the user's mail domain; null when that domain is unknown) and `is_you: true` on the user's own entry. Use it to get attendee addresses for create_meeting. Pass several names in `queries` to look them all up in one call: the answer then has `results`, one group per name, each with its own `people` or `error`. Makes a request to Exchange per name.",
             inputSchema: [
                 "type": "object",
                 "properties": [
                     "query": ["type": "string", "description": "Name, surname or email, at least 2 characters."],
-                    "limit": ["type": "integer", "minimum": 1, "maximum": 25, "description": "Default 10."],
+                    "queries": [
+                        "type": "array",
+                        "items": ["type": "string"],
+                        "minItems": 1,
+                        "maxItems": 10,
+                        "description": "Several names or emails at once, instead of `query`.",
+                    ],
+                    "limit": ["type": "integer", "minimum": 1, "maximum": 25, "description": "People per name. Default 10."],
                     "account_id": ["type": "string", "description": .string(exchangeAccountDescription)],
                 ],
-                "required": ["query"],
                 "additionalProperties": false,
             ]
         ),

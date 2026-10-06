@@ -18,6 +18,8 @@ final class MCPCalendarToolsTests: XCTestCase {
         private let busy: [String: @Sendable (Date) -> Character]
         private(set) var detailCalls: [String] = []
         private(set) var ownEmailCalls = 0
+        private(set) var peopleSearches: [String] = []
+        private let failingSearches: Set<String>
         private(set) var created: [(title: String, start: Date, required: [String], optional: [String])] = []
 
         init(
@@ -28,7 +30,8 @@ final class MCPCalendarToolsTests: XCTestCase {
             people: [ResolvedAttendee] = [],
             ownEmail: String? = nil,
             ownEmailError: Error? = nil,
-            busy: [String: @Sendable (Date) -> Character] = [:]
+            busy: [String: @Sendable (Date) -> Character] = [:],
+            failingSearches: Set<String> = []
         ) {
             self.account = account
             self.attendeesByID = attendeesByID
@@ -38,6 +41,7 @@ final class MCPCalendarToolsTests: XCTestCase {
             self.ownEmail = ownEmail
             self.ownEmailError = ownEmailError
             self.busy = busy
+            self.failingSearches = failingSearches
         }
 
         func getUserAvailability(emails: [String], from start: Date, to end: Date) async throws -> [AttendeeAvailability] {
@@ -50,7 +54,9 @@ final class MCPCalendarToolsTests: XCTestCase {
         }
 
         func findPeople(query: String) async throws -> [ResolvedAttendee] {
-            people.filter { $0.displayName.localizedCaseInsensitiveContains(query) || $0.email.contains(query.lowercased()) }
+            peopleSearches.append(query)
+            if failingSearches.contains(query) { throw URLError(.badServerResponse) }
+            return people.filter { $0.displayName.localizedCaseInsensitiveContains(query) || $0.email.contains(query.lowercased()) }
         }
 
         func resolveOrganizerSMTPEmail() async throws -> String? {
@@ -641,6 +647,71 @@ final class MCPCalendarToolsTests: XCTestCase {
             "required": ["ivanov@corp.ru", "IVANOV@corp.ru"],
             "optional": ["ivanov@partner.com"],
         ]
+    }
+
+    // MARK: - find_people with several names
+
+    func testSeveralNamesAreLookedUpInOneCall() async {
+        let provider = DetailsProvider(account: exchange, people: [ivanov, partner, me, namesake], ownEmail: "me@corp.ru")
+        let (tools, _) = makeTools(events: [], provider: provider)
+
+        let result = await tools.call(name: "find_people", arguments: [
+            "queries": ["Иванов", "Баженов", "иванов", "Сидоров"],
+        ]).structured
+
+        XCTAssertNil(result?["people"])
+        let groups = result?["results"]?.arrayValue ?? []
+        // The repeated name is looked up once.
+        XCTAssertEqual(groups.map { $0["query"] }, ["Иванов", "Баженов", "Сидоров"])
+        XCTAssertEqual(groups[0]["people"]?.arrayValue?.map { $0["email"] }, ["ivanov@corp.ru"])
+        XCTAssertEqual(groups[1]["people"]?.arrayValue?.filter { $0["is_you"] == true }.count, 1)
+        XCTAssertEqual(groups[2]["total"], 0)
+        let searches = await provider.peopleSearches
+        XCTAssertEqual(searches.count, 3)
+        let lookups = await provider.ownEmailCalls
+        XCTAssertEqual(lookups, 1)
+    }
+
+    func testOneFailedNameDoesNotSinkTheOthers() async {
+        let provider = DetailsProvider(account: exchange, people: [ivanov], failingSearches: ["Петров"])
+        let (tools, _) = makeTools(events: [], provider: provider)
+
+        let result = await tools.call(name: "find_people", arguments: ["queries": ["Петров", "Иванов"]])
+
+        XCTAssertFalse(result.isError, result.errorMessage ?? "")
+        let groups = result.structured?["results"]?.arrayValue ?? []
+        XCTAssertNotNil(groups[0]["error"])
+        XCTAssertNil(groups[0]["people"])
+        XCTAssertEqual(groups[1]["people"]?.arrayValue?.count, 1)
+    }
+
+    func testSeveralNamesAreChargedUpFrontOrNotAtAll() async {
+        let provider = DetailsProvider(account: exchange, people: [ivanov])
+        let (tools, _) = makeTools(events: [], provider: provider)
+        // Eight words per name: 9 requests each, 90 in all — more than a minute's budget.
+        let long = (0..<10).map { "Иван\($0) Ив Ива Иванов Петр Пётр Сидор Сидоров" }
+
+        let result = await tools.call(name: "find_people", arguments: ["queries": .array(long.map(JSONValue.string))])
+
+        XCTAssertTrue(result.isError)
+        let searches = await provider.peopleSearches
+        XCTAssertTrue(searches.isEmpty)
+    }
+
+    func testFindPeopleTakesExactlyOneKindOfQuery() async {
+        let (tools, _) = makeTools(events: [])
+        let broken: [[String: JSONValue]] = [
+            [:],
+            ["query": "Иванов", "queries": ["Петров"]],
+            ["queries": []],
+            ["queries": ["Иванов", "П"]],
+            ["queries": .array((0..<11).map { .string("Имя\($0)") })],
+            ["queries": "Иванов"],
+        ]
+        for arguments in broken {
+            let result = await tools.call(name: "find_people", arguments: arguments)
+            XCTAssertTrue(result.isError, "\(arguments)")
+        }
     }
 
     func testCreateMeetingIsOffUntilTheUserAllowsIt() async {
