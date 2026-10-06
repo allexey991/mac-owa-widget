@@ -94,6 +94,9 @@ final class MCPCalendarToolsTests: XCTestCase {
     private let zone = TimeZone(identifier: "Europe/Moscow")!
     private let exchange = CalendarAccount(displayName: "Work", serverURL: "", email: "", accountType: .owa)
     private let local = CalendarAccount(displayName: "iCloud", serverURL: "", email: "", accountType: .eventKit)
+    private let domainLogin = CalendarAccount(displayName: "", serverURL: "https://mail", email: "CORP\\me", accountType: .owa)
+    private let me = ResolvedAttendee(displayName: "Баженов Илья Андреевич", email: "me@corp.ru", jobTitle: nil)
+    private let namesake = ResolvedAttendee(displayName: "Баженов Илья Юрьевич", email: "ibazhenov@corp.ru", jobTitle: nil)
 
     private func date(_ day: Int, _ hour: Int, _ minute: Int = 0) -> Date {
         var calendar = Calendar(identifier: .gregorian)
@@ -201,6 +204,69 @@ final class MCPCalendarToolsTests: XCTestCase {
         XCTAssertEqual(accounts[1]["login"], "CORP\\me")
         XCTAssertNil(accounts[0]["login"])
         XCTAssertNil(accounts[2]["login"])
+    }
+
+    func testStatusLooksUpTheAddressBehindADomainLogin() async {
+        let provider = DetailsProvider(account: exchange, people: [ivanov, me, namesake], ownEmail: "me@corp.ru")
+        let (tools, _) = makeTools(events: [
+            event("mine", day: 6, hour: 10, response: .organizer, organizer: "Баженов Илья Андреевич"),
+            event("theirs", day: 6, hour: 12, organizer: "Иванов Иван"),
+        ], provider: provider)
+
+        let accounts = await tools.call(name: "get_status", arguments: [:]).structured?["accounts"]?.arrayValue ?? []
+        let work = accounts.first { $0["account_id"] == .string(exchange.id.uuidString) }
+
+        XCTAssertEqual(work?["email"], "me@corp.ru")
+        XCTAssertEqual(work?["user_name"], "Баженов Илья Андреевич")
+        // Calendars without a sign-in address get no lookup and no name.
+        let calendar = accounts.first { $0["account_id"] == .string(local.id.uuidString) }
+        XCTAssertEqual(calendar?["email"], .null)
+        XCTAssertNil(calendar?["user_name"])
+
+        // One lookup serves get_status and find_people alike.
+        let search = await tools.call(name: "find_people", arguments: ["query": "Баженов"]).structured
+        let people = search?["people"]?.arrayValue ?? []
+        XCTAssertEqual(people.filter { $0["is_you"] == true }.map { $0["email"] }, ["me@corp.ru"])
+        XCTAssertEqual(people.count, 2)
+        let lookups = await provider.ownEmailCalls
+        XCTAssertEqual(lookups, 1)
+    }
+
+    func testStatusSaysWhoTheUserIsEvenWhenTheLookupFails() async {
+        let provider = DetailsProvider(account: domainLogin, ownEmailError: URLError(.timedOut))
+        let (tools, service) = makeTools(events: [], provider: provider)
+        service.replaceAccountsForTests([domainLogin])
+
+        let account = await tools.call(name: "get_status", arguments: [:]).structured?["accounts"]?.arrayValue?.first
+
+        XCTAssertEqual(account?["email"], .null)
+        XCTAssertEqual(account?["login"], "CORP\\me")
+    }
+
+    func testAddressFoundForADomainLoginKeepsTheLoginToo() async {
+        let provider = DetailsProvider(account: domainLogin, ownEmail: "me@corp.ru")
+        let (tools, service) = makeTools(events: [], provider: provider)
+        service.replaceAccountsForTests([domainLogin])
+
+        let account = await tools.call(name: "get_status", arguments: [:]).structured?["accounts"]?.arrayValue?.first
+
+        XCTAssertEqual(account?["email"], "me@corp.ru")
+        XCTAssertEqual(account?["login"], "CORP\\me")
+    }
+
+    func testEventDetailsMarkTheUserAmongAttendees() async {
+        let attendees = [
+            EventAttendee(name: "Иванов Иван", email: "ivanov@corp.ru", kind: .required, response: .accepted),
+            EventAttendee(name: "Баженов Илья Андреевич", email: "ME@corp.ru", kind: .required, response: .accepted),
+        ]
+        let provider = DetailsProvider(account: exchange, attendeesByID: ["a": attendees], ownEmail: "me@corp.ru")
+        let (tools, _) = makeTools(events: [event("a", day: 6, hour: 10)], provider: provider)
+        _ = await tools.call(name: "get_status", arguments: [:])
+
+        let details = await tools.call(name: "get_event_details", arguments: ["event_id": .string(MCPEventID.short("a"))]).structured
+
+        let marked = details?["attendees"]?.arrayValue?.map { $0["is_you"] }
+        XCTAssertEqual(marked, [nil, true])
     }
 
     // MARK: - list_events

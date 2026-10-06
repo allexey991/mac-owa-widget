@@ -22,6 +22,8 @@ final class MCPCalendarTools {
     /// anyway: the panel's 45 seconds and this must fit in the client's 60.
     static let ownDomainWaitForCreate: TimeInterval = 5
     static let ownDomainWaitForSearch: TimeInterval = 20
+    /// `get_status` is called first and often: it does not hold the answer long for the address.
+    static let ownAddressWaitForStatus: TimeInterval = 5
     /// The address book does not know the user's address: asking again soon will not help.
     static let ownDomainRetryInterval: TimeInterval = 10 * 60
     /// The lookup failed (no network, VPN down): retry soon, or the domain stays "unknown" for
@@ -42,10 +44,10 @@ final class MCPCalendarTools {
     /// Names seen next to addresses in `find_people` answers, for the confirmation panel.
     private var namesByEmail: [String: String] = [:]
     private var recentCreations: [String: (date: Date, result: [String: JSONValue])] = [:]
-    /// The user's own mail domain per account; a `nil` domain is a failed lookup, not repeated
-    /// before `retryAfter`.
-    private var ownDomains: [UUID: (domain: String?, retryAfter: Date)] = [:]
-    private var ownDomainLookups: [UUID: Task<String?, Never>] = [:]
+    /// The user's own address per Exchange account, from Exchange: a DOMAIN\login sign-in does
+    /// not tell it. A `nil` address is a failed lookup, not repeated before `retryAfter`.
+    private var ownAddresses: [UUID: (email: String?, retryAfter: Date)] = [:]
+    private var ownAddressLookups: [UUID: Task<String?, Never>] = [:]
     private var isCreatingMeeting = false
 
     init(
@@ -79,7 +81,7 @@ final class MCPCalendarTools {
         let context = CallContext(now: clock(), coder: MCPDateCoder(timeZone: timeZoneProvider()))
         do {
             switch name {
-            case "get_status": return getStatus(context)
+            case "get_status": return await getStatus(context)
             case "get_current_and_next": return try getCurrentAndNext(arguments, context)
             case "list_events": return try listEvents(arguments, context)
             case "get_schedule_stats": return try getScheduleStats(arguments, context)
@@ -99,12 +101,18 @@ final class MCPCalendarTools {
 
     // MARK: - get_status
 
-    private func getStatus(_ context: CallContext) -> MCPToolResult {
+    private func getStatus(_ context: CallContext) async -> MCPToolResult {
         var result = commonFields(context)
-        result["accounts"] = .array(calendarService.accounts.map { account in
+        var accounts: [JSONValue] = []
+        for account in calendarService.accounts {
             // `email` is the sign-in name: an address, or DOMAIN\login for some Exchange servers.
             let login = account.email.trimmingCharacters(in: .whitespacesAndNewlines)
-            let email = login.contains("@") && !login.contains("\\") ? login : nil
+            var email = Self.isEmailAddress(login) ? login : nil
+            if email == nil, account.accountType == .owa {
+                // Exchange knows the address behind DOMAIN\login. One request, shared with the
+                // own-domain check of find_people and create_meeting, and remembered.
+                email = await ownAddress(account, wait: Self.ownAddressWaitForStatus)
+            }
             let name = account.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
             // The name is whatever the user typed in Settings, often nothing.
             let fallbackName = login.isEmpty ? account.accountType.displayName : login
@@ -115,10 +123,35 @@ final class MCPCalendarTools {
                 // The user's own address tells them apart from the other attendees.
                 "email": .optional(email),
             ]
-            if email == nil, !login.isEmpty { fields["login"] = .string(login) }
-            return .object(fields)
-        })
+            if email == nil || email?.caseInsensitiveCompare(login) != .orderedSame, !login.isEmpty {
+                fields["login"] = .string(login)
+            }
+            if let userName = userName(account) { fields["user_name"] = .string(userName) }
+            accounts.append(.object(fields))
+        }
+        result["accounts"] = .array(accounts)
         return .success(result)
+    }
+
+    /// The user's own name as other people see it: the organizer of the meetings the user
+    /// organized. No request to Exchange; `nil` when the calendar has no such meeting.
+    private func userName(_ account: CalendarAccount) -> String? {
+        var counts: [String: Int] = [:]
+        for event in calendarService.events where event.accountID == account.id && event.responseType == .organizer {
+            guard let name = event.organizer?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { continue }
+            counts[name, default: 0] += 1
+        }
+        return counts.max { $0.value == $1.value ? $0.key > $1.key : $0.value < $1.value }?.key
+    }
+
+    /// The user's own address on the event's account, if already known: `get_event_details`
+    /// does not wait for a lookup just to mark the user.
+    private func knownOwnAddress(_ accountID: UUID) -> String? {
+        if let account = calendarService.accounts.first(where: { $0.id == accountID }),
+           Self.isEmailAddress(account.email.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            return account.email.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return ownAddresses[accountID]?.email
     }
 
     // MARK: - get_current_and_next
@@ -566,13 +599,18 @@ final class MCPCalendarTools {
 
         switch await loadAttendeesAndBody(event) {
         case .available(let attendees, let body, let source):
+            let own = knownOwnAddress(event.accountID)
             result["attendees"] = .array(attendees.map { attendee in
-                [
+                var fields: [String: JSONValue] = [
                     "name": .string(attendee.name),
                     "email": .optional(attendee.email),
                     "kind": .string(attendee.kind.rawValue),
                     "response": .string(Self.responseName(attendee.response)),
                 ]
+                if let own, attendee.email?.caseInsensitiveCompare(own) == .orderedSame {
+                    fields["is_you"] = true
+                }
+                return .object(fields)
             })
             let text = (body ?? event.displayBody)?.trimmingCharacters(in: .whitespacesAndNewlines)
             setBody(text, into: &result)
@@ -623,7 +661,8 @@ final class MCPCalendarTools {
             return .failure("Address book search failed: \(error.localizedDescription)")
         }
 
-        let ownDomain = await ownMailDomain(account, wait: Self.ownDomainWaitForSearch)
+        let own = await ownAddress(account, wait: Self.ownDomainWaitForSearch)
+        let ownDomain = own.flatMap(Self.domain(of:))
         for person in people where !person.displayName.isEmpty {
             namesByEmail[person.email.lowercased()] = person.displayName
         }
@@ -635,6 +674,10 @@ final class MCPCalendarTools {
                 // Unknown rather than a confident `false` when the own domain is unknown.
                 "external": ownDomain == nil ? .null : .bool(Self.isExternal(person.email, ownDomain: ownDomain)),
             ]
+            if let own, person.email.caseInsensitiveCompare(own) == .orderedSame {
+                // Namesakes are common: without this the model cannot tell which one is the user.
+                fields["is_you"] = true
+            }
             if let title = person.jobTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
                 fields["job_title"] = .string(title)
             }
@@ -797,13 +840,18 @@ final class MCPCalendarTools {
         }
     }
 
-    /// The user's own mail domain, waiting at most `wait` for a lookup in flight. A lookup that
-    /// outlives the wait keeps running and fills the cache for the next call.
+    /// The user's own mail domain, waiting at most `wait` for the address lookup.
     private func ownMailDomain(_ account: CalendarAccount, wait: TimeInterval) async -> String? {
-        if let cached = ownDomains[account.id], cached.domain != nil || clock() < cached.retryAfter {
-            return cached.domain
+        await ownAddress(account, wait: wait).flatMap(Self.domain(of:))
+    }
+
+    /// The user's own address, waiting at most `wait` for a lookup in flight. A lookup that
+    /// outlives the wait keeps running and fills the cache for the next call.
+    private func ownAddress(_ account: CalendarAccount, wait: TimeInterval) async -> String? {
+        if let cached = ownAddresses[account.id], cached.email != nil || clock() < cached.retryAfter {
+            return cached.email
         }
-        let lookup = ownDomainLookups[account.id] ?? startOwnDomainLookup(account)
+        let lookup = ownAddressLookups[account.id] ?? startOwnAddressLookup(account)
         return await withTaskGroup(of: String??.self) { group in
             group.addTask { .some(await lookup.value) }
             group.addTask {
@@ -818,26 +866,28 @@ final class MCPCalendarTools {
 
     /// One Exchange request, counted against the budget and reported to the circuit breaker
     /// like any other MCP request.
-    private func startOwnDomainLookup(_ account: CalendarAccount) -> Task<String?, Never> {
+    private func startOwnAddressLookup(_ account: CalendarAccount) -> Task<String?, Never> {
         let task = Task { @MainActor [weak self] () -> String? in
             guard let self else { return nil }
-            defer { self.ownDomainLookups[account.id] = nil }
+            defer { self.ownAddressLookups[account.id] = nil }
             if accessGuard.permitRequest() != nil {
                 return nil
             }
             await accessGuard.acquireSlot()
             defer { accessGuard.releaseSlot() }
             do {
-                let domain = try await calendarService.ownEmail(accountID: account.id).flatMap(Self.domain(of:))
-                ownDomains[account.id] = (domain, clock().addingTimeInterval(Self.ownDomainRetryInterval))
-                return domain
+                let found = try await calendarService.ownEmail(accountID: account.id)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let email = found.flatMap { Self.isEmailAddress($0) ? $0 : nil }
+                ownAddresses[account.id] = (email, clock().addingTimeInterval(Self.ownDomainRetryInterval))
+                return email
             } catch {
                 accessGuard.report(error, context: "mcp.ownEmail")
-                ownDomains[account.id] = (nil, clock().addingTimeInterval(Self.ownDomainErrorRetryInterval))
+                ownAddresses[account.id] = (nil, clock().addingTimeInterval(Self.ownDomainErrorRetryInterval))
                 return nil
             }
         }
-        ownDomainLookups[account.id] = task
+        ownAddressLookups[account.id] = task
         return task
     }
 
