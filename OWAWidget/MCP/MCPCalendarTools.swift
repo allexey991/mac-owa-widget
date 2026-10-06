@@ -195,7 +195,11 @@ final class MCPCalendarTools {
     private func listEvents(_ arguments: [String: JSONValue], _ context: CallContext) throws -> MCPToolResult {
         let todayStart = context.coder.calendar.startOfDay(for: context.now)
         let today = DateInterval(start: todayStart, end: context.coder.calendar.date(byAdding: .day, value: 1, to: todayStart) ?? context.now)
-        let resolved = try resolveRange(arguments, default: today, spanWhenOnlyFrom: .day, context)
+        let seriesID = arguments["series_id"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let seriesID, seriesID.isEmpty { throw ArgumentError("`series_id` is empty; take it from another event's `series_id`") }
+        // A series is asked for as a whole: every occurrence the calendar holds, not just today's.
+        let defaultRange = seriesID == nil ? today : try requireCoverage()
+        let resolved = try resolveRange(arguments, default: defaultRange, spanWhenOnlyFrom: .day, context)
         let accountID = try optionalAccountID(arguments)
         let query = arguments["query"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
         let responses = try responseFilter(arguments["response"])
@@ -209,6 +213,7 @@ final class MCPCalendarTools {
             .filter { includeCancelled || !$0.isEffectivelyCancelled }
             .filter { includeAllDay || !$0.isAllDay }
             .filter { responses.contains($0.responseType) }
+            .filter { seriesID == nil || $0.seriesID == seriesID }
             .filter { event in
                 guard let query, !query.isEmpty else { return true }
                 return [event.title, event.location, event.organizer].contains {
@@ -615,6 +620,11 @@ final class MCPCalendarTools {
             let text = (body ?? event.displayBody)?.trimmingCharacters(in: .whitespacesAndNewlines)
             setBody(text, into: &result)
             result["details_source"] = .string(source)
+            // The details just loaded may be the first to carry a one-off meeting's UID.
+            if result["ical_uid"] == nil, let uid = calendarService.events.first(where: { $0.id == event.id })?.icalUID
+                ?? detailsCache.entry(for: event)?.icalUID {
+                result["ical_uid"] = .string(uid)
+            }
         case .unavailable(let reason, _):
             setBody(event.displayBody, into: &result)
             result["details_unavailable_reason"] = .string(reason)
@@ -1087,6 +1097,16 @@ final class MCPCalendarTools {
         }
         if event.joinURLForActions != nil {
             fields["platform"] = .string(event.platform.rawValue)
+        }
+        // Exchange gives a one-off meeting's UID only with its details: known once loaded.
+        if let uid = event.icalUID ?? detailsCache.entry(for: event)?.icalUID {
+            fields["ical_uid"] = .string(uid)
+        }
+        if let series = event.seriesID {
+            fields["series_id"] = .string(series)
+        }
+        if event.isRecurring {
+            fields["is_recurring"] = true
         }
         return fields
     }

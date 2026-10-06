@@ -41,6 +41,11 @@ struct EventKitEventMapper: Sendable {
             responseType: Self.responseType(for: snapshot, isOrganizer: isOrganizer),
             changeKey: nil,
             instanceKey: nil,
+            // The server's identifier: the iCalendar UID for CalDAV, iCloud and Google; Apple does
+            // not promise that for Exchange accounts. Shared by all occurrences of a series.
+            icalUID: Self.nonEmpty(snapshot.externalIdentifier),
+            seriesID: snapshot.hasRecurrenceRules ? Self.nonEmpty(snapshot.externalIdentifier ?? snapshot.eventIdentifier) : nil,
+            isRecurring: snapshot.hasRecurrenceRules,
             // EventKit hands over participants and the full note in the same pass as the event
             // itself, so there is nothing left for `fetchDetails` to load lazily. Filling both
             // here makes `CalendarService.loadDetails` serve them straight from cache.
@@ -48,6 +53,11 @@ struct EventKitEventMapper: Sendable {
             fullBody: body,
             fullBodyHTML: nil
         )
+    }
+
+    private static func nonEmpty(_ text: String?) -> String? {
+        guard let text = text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
+        return text
     }
 
     /// Stable identity for one occurrence.

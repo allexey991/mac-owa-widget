@@ -110,6 +110,7 @@ actor OWACalendarProvider: CalendarProvider {
         #endif
 
         let id = item.ItemId?.Id ?? UUID().uuidString
+        let identity = Self.identity(of: item)
         let (joinURL, platform) = resolveJoinURL(from: item)
 
         let requiredNames = item.RequiredAttendees?.attendees.compactMap { $0.Mailbox?.Name } ?? []
@@ -134,8 +135,20 @@ actor OWACalendarProvider: CalendarProvider {
             categories: Self.normalizedCategories(from: item),
             responseType: Self.mapResponseType(item.ResponseType, isOrganizer: item.IsOrganizer ?? false),
             changeKey: item.ItemId?.ChangeKey,
-            instanceKey: item.InstanceKey
+            instanceKey: item.InstanceKey,
+            icalUID: identity.icalUID,
+            seriesID: identity.seriesID,
+            isRecurring: identity.isRecurring
         )
+    }
+
+    /// The meeting's identity across mailboxes and calendar systems. `GetCalendarView` carries
+    /// no `UID`, but an occurrence's `SeriesId` is the series' Global Object ID, which is that
+    /// UID for every occurrence; a one-off meeting gets its UID only with its details.
+    static func identity(of item: OWACalendarItem) -> (icalUID: String?, seriesID: String?, isRecurring: Bool) {
+        let series = item.SeriesId.flatMap(ExchangeGlobalObjectID.icalUID(fromHex:))
+        let uid = item.UID.flatMap(ExchangeGlobalObjectID.icalUID(fromHex:)) ?? series
+        return (uid, series, (item.IsRecurring ?? false) || series != nil)
     }
 
     private func resolveJoinURL(from item: OWACalendarItem) -> (URL?, MeetingPlatform) {

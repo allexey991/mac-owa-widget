@@ -926,7 +926,8 @@ actor OWAClient {
         return CalendarEventDetails(
             attendees: OWACalendarEventAttendeesParser.attendees(fromJSONData: data),
             body: body?.text,
-            bodyHTML: body?.html
+            bodyHTML: body?.html,
+            icalUID: OWACalendarEventUIDParser.icalUID(fromJSONData: data)
         )
     }
 

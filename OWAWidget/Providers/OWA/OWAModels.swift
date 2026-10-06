@@ -32,6 +32,13 @@ struct OWACalendarItem: Decodable {
     let ResponseType: String?
     let IsResponseRequested: Bool?
     let InstanceKey: String?
+    /// Global Object ID of the series, hex; only on occurrences and exceptions of a recurring
+    /// meeting. See `ExchangeGlobalObjectID`.
+    let SeriesId: String?
+    let IsRecurring: Bool?
+    /// Global Object ID of the meeting, hex. `GetCalendarEvent` returns it, `GetCalendarView`
+    /// does not (and ignores a request for it).
+    let UID: String?
 
     init(
         ItemId: OWAItemId?,
@@ -54,7 +61,10 @@ struct OWACalendarItem: Decodable {
         Categories: [String]? = nil,
         ResponseType: String? = nil,
         IsResponseRequested: Bool? = nil,
-        InstanceKey: String? = nil
+        InstanceKey: String? = nil,
+        SeriesId: String? = nil,
+        IsRecurring: Bool? = nil,
+        UID: String? = nil
     ) {
         self.ItemId = ItemId
         self.Subject = Subject
@@ -77,6 +87,9 @@ struct OWACalendarItem: Decodable {
         self.ResponseType = ResponseType
         self.IsResponseRequested = IsResponseRequested
         self.InstanceKey = InstanceKey
+        self.SeriesId = SeriesId
+        self.IsRecurring = IsRecurring
+        self.UID = UID
     }
 
     init(from decoder: Decoder) throws {
@@ -102,13 +115,16 @@ struct OWACalendarItem: Decodable {
         ResponseType = try c.decodeIfPresent(String.self, forKey: .ResponseType)
         IsResponseRequested = try c.decodeIfPresent(Bool.self, forKey: .IsResponseRequested)
         InstanceKey = try c.decodeIfPresent(String.self, forKey: .InstanceKey)
+        SeriesId = try c.decodeIfPresent(String.self, forKey: .SeriesId)
+        IsRecurring = try c.decodeIfPresent(Bool.self, forKey: .IsRecurring)
+        UID = try c.decodeIfPresent(String.self, forKey: .UID)
     }
 
     private enum CodingKeys: String, CodingKey {
         case ItemId, Subject, Start, End, IsAllDayEvent, IsCancelled, IsOrganizer, Categories
         case Location, Organizer, TextBody, Body, UniqueBody, NormalizedBody, Preview
         case JoinOnlineMeetingUrl, RequiredAttendees, OptionalAttendees
-        case ResponseType, IsResponseRequested, InstanceKey
+        case ResponseType, IsResponseRequested, InstanceKey, SeriesId, IsRecurring, UID
     }
 
     private struct OWAEncodedCategory: Decodable {

@@ -28,11 +28,15 @@ struct CalendarEventDetails: Sendable, Hashable {
     /// Original markup, kept so the panel can rebuild real tables. Never persisted — it is an
     /// order of magnitude larger than the text and is refetched on demand anyway.
     let bodyHTML: String?
+    /// The meeting's iCalendar UID. Exchange's sync request returns it only for recurring
+    /// meetings (as the series id), so for a one-off meeting this is the only source.
+    let icalUID: String?
 
-    init(attendees: [EventAttendee], body: String? = nil, bodyHTML: String? = nil) {
+    init(attendees: [EventAttendee], body: String? = nil, bodyHTML: String? = nil, icalUID: String? = nil) {
         self.attendees = attendees
         self.body = body
         self.bodyHTML = bodyHTML
+        self.icalUID = icalUID
     }
 }
 
@@ -55,6 +59,13 @@ struct CalendarEvent: Identifiable, Sendable, Hashable, Codable {
     let responseType: MeetingResponseType
     let changeKey: String?
     let instanceKey: String?
+    /// iCalendar UID: the same for every copy of the meeting, in every mailbox and calendar
+    /// system, and for all occurrences of a series. `nil` until known — for a one-off Exchange
+    /// meeting only its details carry it.
+    let icalUID: String?
+    /// Identity of the recurring series this occurrence belongs to; `nil` for a one-off meeting.
+    let seriesID: String?
+    let isRecurring: Bool
     /// Lazily loaded participant list. `nil` = not yet fetched; `[]` = fetched, no attendees.
     let detailedAttendees: [EventAttendee]?
     /// Lazily loaded full agenda. `bodyPreview` from the sync request is capped at 255 characters
@@ -83,6 +94,9 @@ struct CalendarEvent: Identifiable, Sendable, Hashable, Codable {
         responseType: MeetingResponseType = .notResponded,
         changeKey: String? = nil,
         instanceKey: String? = nil,
+        icalUID: String? = nil,
+        seriesID: String? = nil,
+        isRecurring: Bool = false,
         detailedAttendees: [EventAttendee]? = nil,
         fullBody: String? = nil,
         fullBodyHTML: String? = nil
@@ -105,6 +119,9 @@ struct CalendarEvent: Identifiable, Sendable, Hashable, Codable {
         self.responseType = responseType
         self.changeKey = changeKey
         self.instanceKey = instanceKey
+        self.icalUID = icalUID
+        self.seriesID = seriesID
+        self.isRecurring = isRecurring || seriesID != nil
         self.detailedAttendees = detailedAttendees
         self.fullBody = fullBody
         self.fullBodyHTML = fullBodyHTML
@@ -130,6 +147,9 @@ struct CalendarEvent: Identifiable, Sendable, Hashable, Codable {
         responseType = try c.decodeIfPresent(MeetingResponseType.self, forKey: .responseType) ?? .notResponded
         changeKey = try c.decodeIfPresent(String.self, forKey: .changeKey)
         instanceKey = try c.decodeIfPresent(String.self, forKey: .instanceKey)
+        icalUID = try c.decodeIfPresent(String.self, forKey: .icalUID)
+        seriesID = try c.decodeIfPresent(String.self, forKey: .seriesID)
+        isRecurring = try c.decodeIfPresent(Bool.self, forKey: .isRecurring) ?? (seriesID != nil)
         detailedAttendees = try c.decodeIfPresent([EventAttendee].self, forKey: .detailedAttendees)
         fullBody = try c.decodeIfPresent(String.self, forKey: .fullBody)
         fullBodyHTML = nil
@@ -155,6 +175,9 @@ struct CalendarEvent: Identifiable, Sendable, Hashable, Codable {
         try c.encode(responseType, forKey: .responseType)
         try c.encodeIfPresent(changeKey, forKey: .changeKey)
         try c.encodeIfPresent(instanceKey, forKey: .instanceKey)
+        try c.encodeIfPresent(icalUID, forKey: .icalUID)
+        try c.encodeIfPresent(seriesID, forKey: .seriesID)
+        try c.encode(isRecurring, forKey: .isRecurring)
         try c.encodeIfPresent(detailedAttendees, forKey: .detailedAttendees)
         try c.encodeIfPresent(fullBody, forKey: .fullBody)
     }
@@ -163,6 +186,7 @@ struct CalendarEvent: Identifiable, Sendable, Hashable, Codable {
         case id, title, startDate, endDate, location, bodyPreview, joinURL, platform
         case isAllDay, organizer, attendees, accountID
         case isCancelled, isOrganizer, categories, responseType, changeKey, instanceKey
+        case icalUID, seriesID, isRecurring
         case detailedAttendees, fullBody
     }
 
@@ -174,7 +198,8 @@ struct CalendarEvent: Identifiable, Sendable, Hashable, Codable {
             attendees: attendees, accountID: accountID,
             isCancelled: isCancelled, isOrganizer: isOrganizer,
             categories: categories, responseType: type, changeKey: changeKey,
-            instanceKey: instanceKey, detailedAttendees: detailedAttendees,
+            instanceKey: instanceKey, icalUID: icalUID, seriesID: seriesID, isRecurring: isRecurring,
+            detailedAttendees: detailedAttendees,
             fullBody: fullBody, fullBodyHTML: fullBodyHTML
         )
     }
@@ -189,7 +214,8 @@ struct CalendarEvent: Identifiable, Sendable, Hashable, Codable {
             attendees: attendees, accountID: accountID,
             isCancelled: isCancelled, isOrganizer: isOrganizer,
             categories: categories, responseType: responseType, changeKey: changeKey,
-            instanceKey: instanceKey, detailedAttendees: details.attendees,
+            instanceKey: instanceKey, icalUID: details.icalUID ?? icalUID, seriesID: seriesID,
+            isRecurring: isRecurring, detailedAttendees: details.attendees,
             fullBody: details.body ?? fullBody,
             fullBodyHTML: details.bodyHTML ?? fullBodyHTML
         )

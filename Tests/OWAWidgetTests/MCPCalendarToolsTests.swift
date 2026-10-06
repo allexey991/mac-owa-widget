@@ -8,6 +8,7 @@ final class MCPCalendarToolsTests: XCTestCase {
     private actor DetailsProvider: CalendarProvider {
         nonisolated let account: CalendarAccount
         private let attendeesByID: [String: [EventAttendee]]
+        private let uidByID: [String: String]
         private let error: Error?
         private let people: [ResolvedAttendee]
         private let ownEmail: String?
@@ -22,6 +23,7 @@ final class MCPCalendarToolsTests: XCTestCase {
         init(
             account: CalendarAccount,
             attendeesByID: [String: [EventAttendee]] = [:],
+            uidByID: [String: String] = [:],
             error: Error? = nil,
             people: [ResolvedAttendee] = [],
             ownEmail: String? = nil,
@@ -30,6 +32,7 @@ final class MCPCalendarToolsTests: XCTestCase {
         ) {
             self.account = account
             self.attendeesByID = attendeesByID
+            self.uidByID = uidByID
             self.error = error
             self.people = people
             self.ownEmail = ownEmail
@@ -74,7 +77,9 @@ final class MCPCalendarToolsTests: XCTestCase {
         func fetchDetails(for event: CalendarEvent) async throws -> CalendarEventDetails {
             detailCalls.append(event.id)
             if let error { throw error }
-            return CalendarEventDetails(attendees: attendeesByID[event.id] ?? [], body: "Agenda of \(event.id)")
+            return CalendarEventDetails(
+                attendees: attendeesByID[event.id] ?? [], body: "Agenda of \(event.id)", icalUID: uidByID[event.id]
+            )
         }
     }
 
@@ -116,14 +121,15 @@ final class MCPCalendarToolsTests: XCTestCase {
         cancelled: Bool = false,
         organizer: String? = nil,
         attendees: [EventAttendee]? = nil,
-        joinURL: URL? = nil
+        joinURL: URL? = nil,
+        series: String? = nil
     ) -> CalendarEvent {
         let start = date(day, hour)
         return CalendarEvent(
             id: id, title: id, startDate: start, endDate: start.addingTimeInterval(TimeInterval(minutes * 60)),
             location: nil, bodyPreview: "preview \(id)", joinURL: joinURL, platform: joinURL == nil ? .generic : .teams,
             isAllDay: false, organizer: organizer, accountID: (account ?? exchange).id, isCancelled: cancelled, responseType: response,
-            changeKey: "ck-\(id)", detailedAttendees: attendees
+            changeKey: "ck-\(id)", icalUID: series, seriesID: series, detailedAttendees: attendees
         )
     }
 
@@ -480,6 +486,47 @@ final class MCPCalendarToolsTests: XCTestCase {
         // The first rejection stops the walk: no second credential submission.
         let calls = await provider.detailCalls
         XCTAssertEqual(calls, ["a"])
+    }
+
+    // MARK: - Series and iCalendar UID
+
+    func testSeriesIDListsEveryOccurrenceTheCalendarHolds() async {
+        let (tools, _) = makeTools(events: [
+            event("weekly-past", day: 1, hour: 15, series: "S1"),
+            event("weekly-now", day: 5, hour: 15, series: "S1"),
+            event("weekly-next", day: 12, hour: 15, series: "S1"),
+            event("other-series", day: 5, hour: 10, series: "S2"),
+            event("one-off", day: 5, hour: 11),
+        ])
+
+        let today = await tools.call(name: "list_events", arguments: [:]).structured
+        let fields = today?["events"]?.arrayValue?.first { $0["title"] == "weekly-now" }
+        XCTAssertEqual(fields?["series_id"], "S1")
+        XCTAssertEqual(fields?["ical_uid"], "S1")
+        XCTAssertEqual(fields?["is_recurring"], true)
+        let oneOff = today?["events"]?.arrayValue?.first { $0["title"] == "one-off" }
+        XCTAssertNil(oneOff?["series_id"])
+        XCTAssertNil(oneOff?["is_recurring"])
+
+        // Without from/to the whole coverage, not just today.
+        let series = await tools.call(name: "list_events", arguments: ["series_id": "S1"]).structured
+        XCTAssertEqual(ids(series?["events"]), ["weekly-past", "weekly-now", "weekly-next"])
+        let empty = await tools.call(name: "list_events", arguments: ["series_id": " "])
+        XCTAssertTrue(empty.isError)
+    }
+
+    func testOneOffMeetingUIDAppearsOnceItsDetailsLoad() async {
+        let provider = DetailsProvider(account: exchange, uidByID: ["a": "UID-A"])
+        let (tools, _) = makeTools(events: [event("a", day: 5, hour: 14)], provider: provider)
+        let handle = MCPEventID.short("a")
+
+        let before = await tools.call(name: "list_events", arguments: [:]).structured?["events"]?.arrayValue?.first
+        XCTAssertNil(before?["ical_uid"])
+
+        let details = await tools.call(name: "get_event_details", arguments: ["event_id": .string(handle)]).structured
+        XCTAssertEqual(details?["ical_uid"], "UID-A")
+        let after = await tools.call(name: "list_events", arguments: [:]).structured?["events"]?.arrayValue?.first
+        XCTAssertEqual(after?["ical_uid"], "UID-A")
     }
 
     // MARK: - get_event_details

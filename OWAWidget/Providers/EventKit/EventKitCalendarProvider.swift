@@ -113,7 +113,8 @@ actor EventKitCalendarProvider: CalendarProvider {
         return CalendarEventDetails(
             attendees: mapped.detailedAttendees ?? [],
             body: mapped.fullBody,
-            bodyHTML: nil
+            bodyHTML: nil,
+            icalUID: mapped.icalUID
         )
     }
 

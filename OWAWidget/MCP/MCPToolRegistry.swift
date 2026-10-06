@@ -37,7 +37,7 @@ enum MCPToolRegistry {
         MCPToolDefinition(
             name: "list_events",
             title: "List meetings",
-            description: "Meetings in a period (default: today), sorted by start. Declined meetings are excluded unless requested via `response`. The period is clipped to `coverage` (7 days back, 30 days ahead). `total` counts all matches; `truncated` is true when `limit` cut the list. Returns no join links, descriptions or attendees: use get_event_details for those, and find_events_with_person to find meetings with someone.",
+            description: "Meetings in a period (default: today), sorted by start. Declined meetings are excluded unless requested via `response`. The period is clipped to `coverage` (7 days back, 30 days ahead). `total` counts all matches; `truncated` is true when `limit` cut the list. Returns no join links, descriptions or attendees: use get_event_details for those, and find_events_with_person to find meetings with someone. Each event may carry `ical_uid` (the meeting's identity, the same in every attendee's calendar and every calendar system; for a one-off Exchange meeting known only after get_event_details), and a recurring one `is_recurring` and `series_id`: pass `series_id` to list every occurrence of that series.",
             inputSchema: [
                 "type": "object",
                 "properties": [
@@ -52,6 +52,7 @@ enum MCPToolRegistry {
                     ],
                     "include_cancelled": ["type": "boolean", "description": "Include cancelled meetings. Default false."],
                     "include_all_day": ["type": "boolean", "description": "Include all-day events. Default true."],
+                    "series_id": ["type": "string", "description": "Only occurrences of this recurring series (`series_id` from another event). Without `from`/`to` the whole `coverage` is searched."],
                     "limit": ["type": "integer", "minimum": 1, "maximum": 300, "description": "Default 100."],
                 ],
                 "additionalProperties": false,

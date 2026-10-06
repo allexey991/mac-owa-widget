@@ -363,7 +363,30 @@ enum OWACreateCalendarEventPayload {
     }
 }
 
-// MARK: - GetCalendarEvent attendees parser
+// MARK: - GetCalendarEvent UID and attendees parsers
+
+/// The meeting's Global Object ID (`UID`) from a `GetCalendarEvent` response, as the iCalendar
+/// UID. The item is the object that has both `ItemId` and `UID`.
+enum OWACalendarEventUIDParser {
+    static func icalUID(fromJSONData data: Data) -> String? {
+        guard let json = try? JSONSerialization.jsonObject(with: data) else { return nil }
+        return find(in: json).flatMap(ExchangeGlobalObjectID.icalUID(fromHex:))
+    }
+
+    private static func find(in value: Any) -> String? {
+        if let object = value as? [String: Any] {
+            if object["ItemId"] != nil, let uid = object["UID"] as? String, !uid.isEmpty { return uid }
+            for child in object.values {
+                if let found = find(in: child) { return found }
+            }
+        } else if let array = value as? [Any] {
+            for child in array {
+                if let found = find(in: child) { return found }
+            }
+        }
+        return nil
+    }
+}
 
 /// Tolerant extractor for attendees out of a `GetCalendarEvent` response. The exact wrapper shape
 /// varies by Exchange build, so we recursively locate `RequiredAttendees`/`OptionalAttendees`

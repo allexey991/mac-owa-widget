@@ -95,6 +95,7 @@ final class MCPEventDetailsCache {
     struct Entry: Equatable {
         let attendees: [EventAttendee]
         let body: String?
+        var icalUID: String? = nil
     }
 
     let capacity: Int
@@ -112,7 +113,7 @@ final class MCPEventDetailsCache {
     func store(_ details: CalendarEventDetails, for event: CalendarEvent) {
         let key = Self.key(event)
         if entries[key] == nil { order.append(key) }
-        entries[key] = Entry(attendees: details.attendees, body: details.body)
+        entries[key] = Entry(attendees: details.attendees, body: details.body, icalUID: details.icalUID)
         while order.count > capacity {
             entries.removeValue(forKey: order.removeFirst())
         }
