@@ -1,9 +1,10 @@
 import AppKit
 import SwiftUI
 
-/// What an MCP client wants to create, with "Cancel" and a button named after what it does
-/// ("Add to Calendar" / "Send Invitations"). Shown by `MCPMeetingConfirmationController`;
-/// nothing is sent to Exchange before that button.
+/// What an MCP client wants to create, with "Edit…", "Cancel" and a button named after what it
+/// does ("Add to Calendar" / "Send Invitations"). Shown by `MCPMeetingConfirmationController`;
+/// nothing is sent to Exchange before that button. Edit hands the meeting to the New Meeting
+/// window instead, where the user changes it and sends it themselves.
 struct MCPMeetingConfirmationView: View {
     /// Internal attendees shown per section; external ones are always all shown.
     static let visibleAttendeeLimit = 8
@@ -19,6 +20,7 @@ struct MCPMeetingConfirmationView: View {
     let localization: LocalizationService
     let onConfirm: () -> Void
     let onReject: () -> Void
+    let onEdit: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -32,11 +34,9 @@ struct MCPMeetingConfirmationView: View {
             .padding(16)
 
             TimelineView(.animation(minimumInterval: 0.25)) { context in
-                VStack(spacing: 0) {
-                    countdownBar(remaining: remaining(at: context.date))
-                    footer(remaining: remaining(at: context.date))
-                }
+                countdownBar(remaining: remaining(at: context.date))
             }
+            footer
         }
         .frame(width: 420, alignment: .leading)
         // Empty areas drag the window: it opens in the middle of the screen and may cover what
@@ -67,6 +67,16 @@ struct MCPMeetingConfirmationView: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            // Up here rather than in the footer: three buttons leave the footer no room for it.
+            TimelineView(.animation(minimumInterval: 0.25)) { context in
+                let remaining = remaining(at: context.date)
+                Text(localization.tr("mcp.confirm.countdown", Int(remaining.rounded(.up))))
+                    .font(.system(size: 11).monospacedDigit())
+                    .foregroundStyle(countdownColor(remaining))
+                    .lineLimit(1)
+            }
+            .fixedSize()
         }
     }
 
@@ -195,15 +205,16 @@ struct MCPMeetingConfirmationView: View {
         .background(Color.primary.opacity(0.08))
     }
 
-    private func footer(remaining: TimeInterval) -> some View {
+    private var footer: some View {
         HStack(spacing: 10) {
-            // The countdown gives way, never the buttons: a cut "Send Invitati…" hides what the
-            // button does.
-            Text(localization.tr("mcp.confirm.countdown", Int(remaining.rounded(.up))))
-                .font(.system(size: 11).monospacedDigit())
-                .foregroundStyle(countdownColor(remaining))
-                .lineLimit(1)
-                .layoutPriority(-1)
+            // Away from the other two, and borderless: it neither sends nor cancels, and a
+            // third bordered button would not fit next to "Send Invitations".
+            Button(localization.tr("mcp.confirm.edit"), action: onEdit)
+                .buttonStyle(.borderless)
+                // Borderless text is grey in this panel and reads as disabled.
+                .foregroundStyle(Color.accentColor)
+                .help(localization.tr("mcp.confirm.edit.help"))
+                .fixedSize()
             Spacer(minLength: 4)
             Button(localization.tr("mcp.confirm.reject"), action: onReject)
                 .keyboardShortcut(.cancelAction)

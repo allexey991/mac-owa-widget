@@ -10,11 +10,19 @@ final class MCPMeetingConfirmationTests: XCTestCase {
         private(set) var closed = 0
         var onConfirm: (() -> Void)?
         var onReject: (() -> Void)?
+        var onEdit: (() -> Void)?
 
-        func show(_ proposal: MCPMeetingProposal, deadline: Date, onConfirm: @escaping () -> Void, onReject: @escaping () -> Void) {
+        func show(
+            _ proposal: MCPMeetingProposal,
+            deadline: Date,
+            onConfirm: @escaping () -> Void,
+            onReject: @escaping () -> Void,
+            onEdit: @escaping () -> Void
+        ) {
             shown += 1
             self.onConfirm = onConfirm
             self.onReject = onReject
+            self.onEdit = onEdit
         }
 
         func close() { closed += 1 }
@@ -33,18 +41,38 @@ final class MCPMeetingConfirmationTests: XCTestCase {
     }
 
     func testButtonsAnswerAndClosePanel() async {
-        for (press, expected) in [(true, MCPConfirmationOutcome.confirmed), (false, .rejected)] {
+        let buttons: [(press: (FakePresenter) -> Void, expected: MCPConfirmationOutcome)] = [
+            ({ $0.onConfirm?() }, .confirmed),
+            ({ $0.onReject?() }, .rejected),
+            ({ $0.onEdit?() }, .handedOff),
+        ]
+        for (press, expected) in buttons {
             let presenter = FakePresenter()
             let controller = MCPMeetingConfirmationController(presenter: presenter)
             let answer = Task { await controller.confirm(proposal, timeout: 30) }
             await waitUntilShown(presenter)
 
-            press ? presenter.onConfirm?() : presenter.onReject?()
+            press(presenter)
 
             let outcome = await answer.value
             XCTAssertEqual(outcome, expected)
             XCTAssertEqual(presenter.closed, 1)
         }
+    }
+
+    func testEditStopsTheCountdown() async {
+        let presenter = FakePresenter()
+        let controller = MCPMeetingConfirmationController(presenter: presenter)
+        let answer = Task { await controller.confirm(proposal, timeout: 0.1) }
+        await waitUntilShown(presenter)
+
+        presenter.onEdit?()
+        let outcome = await answer.value
+        try? await Task.sleep(for: .milliseconds(200))
+
+        XCTAssertEqual(outcome, .handedOff)
+        // The timer that would have fired meanwhile closes nothing a second time.
+        XCTAssertEqual(presenter.closed, 1)
     }
 
     func testNoAnswerTimesOutAndALateClickChangesNothing() async {

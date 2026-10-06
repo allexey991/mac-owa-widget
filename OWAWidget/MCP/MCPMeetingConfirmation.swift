@@ -34,6 +34,8 @@ struct MCPMeetingProposal: Equatable, Sendable {
 enum MCPConfirmationOutcome: Equatable, Sendable {
     case confirmed
     case rejected
+    /// The user pressed Edit: the meeting goes to the New Meeting window to finish by hand.
+    case handedOff
     case timedOut
     /// The client cancelled the request (`notifications/cancelled`) or disconnected.
     case cancelled
@@ -50,7 +52,13 @@ protocol MCPMeetingConfirming: AnyObject {
 /// window.
 @MainActor
 protocol MCPConfirmationPresenting: AnyObject {
-    func show(_ proposal: MCPMeetingProposal, deadline: Date, onConfirm: @escaping () -> Void, onReject: @escaping () -> Void)
+    func show(
+        _ proposal: MCPMeetingProposal,
+        deadline: Date,
+        onConfirm: @escaping () -> Void,
+        onReject: @escaping () -> Void,
+        onEdit: @escaping () -> Void
+    )
     func close()
 }
 
@@ -85,7 +93,8 @@ final class MCPMeetingConfirmationController: MCPMeetingConfirming {
                     proposal,
                     deadline: Date().addingTimeInterval(timeout),
                     onConfirm: { [weak self] in self?.finish(.confirmed, generation: current) },
-                    onReject: { [weak self] in self?.finish(.rejected, generation: current) }
+                    onReject: { [weak self] in self?.finish(.rejected, generation: current) },
+                    onEdit: { [weak self] in self?.finish(.handedOff, generation: current) }
                 )
                 timeoutTask = Task { [weak self] in
                     try? await Task.sleep(for: .seconds(timeout))
@@ -115,7 +124,13 @@ final class MCPMeetingConfirmationController: MCPMeetingConfirming {
 final class MCPConfirmationPanel: MCPConfirmationPresenting {
     private var panel: NSPanel?
 
-    func show(_ proposal: MCPMeetingProposal, deadline: Date, onConfirm: @escaping () -> Void, onReject: @escaping () -> Void) {
+    func show(
+        _ proposal: MCPMeetingProposal,
+        deadline: Date,
+        onConfirm: @escaping () -> Void,
+        onReject: @escaping () -> Void,
+        onEdit: @escaping () -> Void
+    ) {
         close()
         let localization = LocalizationService()
         let view = MCPMeetingConfirmationView(
@@ -124,7 +139,8 @@ final class MCPConfirmationPanel: MCPConfirmationPresenting {
             deadline: deadline,
             localization: localization,
             onConfirm: onConfirm,
-            onReject: onReject
+            onReject: onReject,
+            onEdit: onEdit
         )
         .environment(\.locale, localization.locale)
 

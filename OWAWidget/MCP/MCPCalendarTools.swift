@@ -35,6 +35,8 @@ final class MCPCalendarTools {
     private let isEnabled: () -> Bool
     private let canCreateMeetings: () -> Bool
     private let confirmer: MCPMeetingConfirming
+    /// Sends a meeting the user chose to edit to the New Meeting window.
+    private let handOff: (MeetingDraftSeed) -> Void
     private let confirmationTimeout: TimeInterval
     private let timeZoneProvider: () -> TimeZone
     /// Names seen next to addresses in `find_people` answers, for the confirmation panel.
@@ -51,6 +53,7 @@ final class MCPCalendarTools {
         accessGuard: MCPAccessGuard? = nil,
         detailsCache: MCPEventDetailsCache = MCPEventDetailsCache(),
         confirmer: MCPMeetingConfirming? = nil,
+        handOff: @escaping (MeetingDraftSeed) -> Void = { MeetingDraftInbox.shared.deliver($0) },
         confirmationTimeout: TimeInterval = MCPCalendarTools.confirmationTimeout,
         clock: @escaping () -> Date = { Date() },
         timeZone: @escaping () -> TimeZone = { AppTimeZone.zone },
@@ -61,6 +64,7 @@ final class MCPCalendarTools {
         self.accessGuard = accessGuard ?? MCPAccessGuard(calendarService: calendarService, clock: clock)
         self.detailsCache = detailsCache
         self.confirmer = confirmer ?? MCPMeetingConfirmationController()
+        self.handOff = handOff
         self.confirmationTimeout = confirmationTimeout
         self.clock = clock
         self.timeZoneProvider = timeZone
@@ -718,6 +722,15 @@ final class MCPCalendarTools {
             break
         case .rejected:
             return .failure("The user declined in OWA Widget. Nothing was created; do not retry unless the user asks.")
+        case .handedOff:
+            // Not an error: models retry errors, and this one is settled — the user took over.
+            handOff(MeetingDraftSeed(proposal: proposal, accountID: account.id))
+            var result = commonFields(context)
+            result["created"] = false
+            result["handed_off"] = true
+            result["note"] = "The user chose to finish this meeting in OWA Widget's New Meeting window: they may change the time, attendees or text and send it themselves. Nothing has been sent yet. Do not call create_meeting for it again. You will not learn whether it gets created; if asked, check list_events after the next sync."
+            recentCreations[key] = (context.now, result)
+            return .success(result)
         case .timedOut:
             return .failure("The user did not answer in OWA Widget within \(Int(confirmationTimeout)) seconds. Nothing was created; ask the user whether to try again.")
         case .cancelled:

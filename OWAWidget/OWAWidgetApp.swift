@@ -61,24 +61,20 @@ struct OWAWidgetApp: App {
         .menuBarExtraStyle(.window)
 
         Window(localizationService.tr("window.create.meeting.title"), id: "create-meeting") {
-            Group {
-                if let account = calendarService.meetingCreationAccount {
-                    CreateMeetingView(calendarService: calendarService, accountID: account.id)
-                        .environmentObject(localizationService)
-                        .environmentObject(appearanceService)
-                        .environment(\.locale, localizationService.locale)
+            CreateMeetingWindowContent(calendarService: calendarService)
+                .environmentObject(localizationService)
+                .environmentObject(appearanceService)
+                .environment(\.locale, localizationService.locale)
+                .onAppear {
+                    DiagnosticLog.event("Window create-meeting appeared")
+                    AppDelegate.createMeetingWindowVisible = true
+                    AppDelegate.updateActivationPolicy()
+                    NSApp.activate(ignoringOtherApps: true)
                 }
-            }
-            .onAppear {
-                DiagnosticLog.event("Window create-meeting appeared")
-                AppDelegate.createMeetingWindowVisible = true
-                AppDelegate.updateActivationPolicy()
-                NSApp.activate(ignoringOtherApps: true)
-            }
-            .onDisappear {
-                AppDelegate.createMeetingWindowVisible = false
-                AppDelegate.updateActivationPolicy()
-            }
+                .onDisappear {
+                    AppDelegate.createMeetingWindowVisible = false
+                    AppDelegate.updateActivationPolicy()
+                }
         }
         .windowResizability(.contentMinSize)
         .defaultSize(width: 900, height: 680)

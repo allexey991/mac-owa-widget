@@ -347,6 +347,12 @@
 "create.meeting.duration.chip.minutes" = "%dm";
 "create.meeting.duration.chip.hours" = "%@h";
 "create.meeting.success.close" = "Close";
+"create.meeting.offeredDraft" = "%1$@ suggests the meeting “%2$@”. Replace your draft with it?";
+"create.meeting.offeredDraft.unknownClient" = "An AI assistant suggests the meeting “%@”. Replace your draft with it?";
+"create.meeting.offeredDraft.keep" = "Keep Mine";
+"create.meeting.offeredDraft.replace" = "Replace";
+"create.meeting.seeded" = "Suggested by %@: check the time and attendees";
+"create.meeting.seeded.unknownClient" = "Suggested by an AI assistant: check the time and attendees";
 
 "popover.search" = "Search meetings";
 "search.placeholder" = "Search by title, people, location";
@@ -435,7 +441,7 @@
 "mcp.enabled" = "Allow AI assistants to read the calendar (MCP)";
 "mcp.description" = "Claude, Cursor and other MCP clients can see your meetings for the last 7 days and the next 30, answer questions about your schedule and look people up in the address book. Read only unless allowed below.";
 "mcp.createMeetings" = "Allow creating meetings";
-"mcp.createMeetings.description" = "The AI assistant can propose a meeting with invitations. You confirm each one in an OWA Widget window: nothing is sent until you confirm.";
+"mcp.createMeetings.description" = "The AI assistant can propose a meeting with invitations. You confirm each one in an OWA Widget window: nothing is sent until you confirm. Edit opens it in the New Meeting window, where you change the time or attendees and send it yourself.";
 "mcp.confirm.title" = "%@ wants to create a meeting";
 "mcp.confirm.titleUnknownClient" = "An AI assistant wants to create a meeting";
 "mcp.confirm.countdown" = "%d s left";
@@ -454,6 +460,8 @@
 "mcp.confirm.agendaForAttendees" = "Description, sent to the attendees";
 "mcp.confirm.today" = "today";
 "mcp.confirm.tomorrow" = "tomorrow";
+"mcp.confirm.edit" = "Edit…";
+"mcp.confirm.edit.help" = "Open the meeting in the New Meeting window to change the time, attendees or text and send the invitations yourself";
 "mcp.privacy.warning" = "Meeting titles, locations and descriptions, and the names and addresses of attendees, will be sent to the AI service you use. Check that your company's policy allows this.";
 "mcp.status" = "Status";
 "mcp.status.stopped" = "Not started";

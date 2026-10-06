@@ -30,6 +30,9 @@ struct CreateMeetingView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var localization: LocalizationService
     @StateObject private var vm: CreateMeetingViewModel
+    @ObservedObject private var draftInbox = MeetingDraftInbox.shared
+    /// Rebuilds the window for another Exchange account when a draft from that account arrives.
+    private let onSwitchAccount: (UUID) -> Void
     @State private var requiredFieldHeight: CGFloat = 36
     @State private var optionalFieldHeight: CGFloat = 36
     @State private var slotViewMode: SlotViewMode = .grid
@@ -39,15 +42,19 @@ struct CreateMeetingView: View {
         Binding(get: { CGFloat(leftColumnWidthRaw) }, set: { leftColumnWidthRaw = Double($0) })
     }
 
-    init(calendarService: CalendarService, accountID: UUID) {
+    init(calendarService: CalendarService, accountID: UUID, onSwitchAccount: @escaping (UUID) -> Void = { _ in }) {
         _vm = StateObject(wrappedValue: CreateMeetingViewModel(
             calendarService: calendarService,
             accountID: accountID
         ))
+        self.onSwitchAccount = onSwitchAccount
     }
 
     var body: some View {
         VStack(spacing: 0) {
+            if let seed = vm.offeredSeed {
+                offeredDraftBanner(seed)
+            }
             HStack(alignment: .top, spacing: 0) {
                 // Left column: meeting details + frequent contacts
                 ScrollView(.vertical, showsIndicators: false) {
@@ -94,8 +101,64 @@ struct CreateMeetingView: View {
                 MeetingCreatedOverlay(title: vm.draft.title, onDismiss: { dismiss() })
             }
         }
+        .onAppear { takeDraftFromInbox() }
+        .onReceive(draftInbox.$pending) { _ in takeDraftFromInbox() }
         .onDisappear {
             vm.reset()
+        }
+    }
+
+    // MARK: - Draft from an AI assistant
+
+    /// A draft handed over by the MCP confirmation panel's Edit button. One for another account
+    /// stays in the inbox while the window is rebuilt for that account, unless the user has work
+    /// of their own here: then it is offered first.
+    private func takeDraftFromInbox() {
+        guard draftInbox.pending != nil else { return }
+        guard let seed = draftInbox.fresh else {
+            _ = draftInbox.take()
+            return
+        }
+        if seed.accountID != vm.accountID, vm.canReplaceDraftSilently {
+            onSwitchAccount(seed.accountID)
+            return
+        }
+        _ = draftInbox.take()
+        vm.receive(seed)
+    }
+
+    private func acceptOfferedSeed(_ seed: MeetingDraftSeed) {
+        if seed.accountID != vm.accountID {
+            vm.dismissOfferedSeed()
+            draftInbox.hold(seed)
+            onSwitchAccount(seed.accountID)
+        } else {
+            vm.apply(seed)
+        }
+    }
+
+    private func offeredDraftBanner(_ seed: MeetingDraftSeed) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: "sparkles")
+                    .foregroundStyle(Color.accentColor)
+                Text(seed.client.isEmpty
+                    ? localization.tr("create.meeting.offeredDraft.unknownClient", seed.title)
+                    : localization.tr("create.meeting.offeredDraft", seed.client, seed.title))
+                    .font(.system(size: 12))
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button(localization.tr("create.meeting.offeredDraft.keep")) { vm.dismissOfferedSeed() }
+                    .fixedSize()
+                Button(localization.tr("create.meeting.offeredDraft.replace")) { acceptOfferedSeed(seed) }
+                    .buttonStyle(.borderedProminent)
+                    .fixedSize()
+            }
+            .controlSize(.small)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 10)
+            .background(Color.accentColor.opacity(0.08))
+            Divider()
         }
     }
 
@@ -702,6 +765,17 @@ struct CreateMeetingView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(.red)
                         .lineLimit(2)
+                } else if let client = vm.seedClient {
+                    HStack(spacing: 6) {
+                        Image(systemName: "sparkles")
+                            .foregroundStyle(Color.accentColor)
+                        Text(client.isEmpty
+                            ? localization.tr("create.meeting.seeded.unknownClient")
+                            : localization.tr("create.meeting.seeded", client))
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
                 }
 
                 Spacer()

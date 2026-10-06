@@ -347,6 +347,12 @@
 "create.meeting.duration.chip.minutes" = "%dм";
 "create.meeting.duration.chip.hours" = "%@ч";
 "create.meeting.success.close" = "Закрыть";
+"create.meeting.offeredDraft" = "%1$@ предлагает встречу «%2$@». Заменить ею ваш черновик?";
+"create.meeting.offeredDraft.unknownClient" = "AI-ассистент предлагает встречу «%@». Заменить ею ваш черновик?";
+"create.meeting.offeredDraft.keep" = "Оставить мой";
+"create.meeting.offeredDraft.replace" = "Заменить";
+"create.meeting.seeded" = "Встречу предложил %@: проверьте время и участников";
+"create.meeting.seeded.unknownClient" = "Встречу предложил AI-ассистент: проверьте время и участников";
 
 "popover.search" = "Поиск встреч";
 "search.placeholder" = "Название, участники, место";
@@ -435,7 +441,7 @@
 "mcp.enabled" = "Разрешить AI-ассистентам читать календарь (MCP)";
 "mcp.description" = "Claude, Cursor и другие MCP-клиенты увидят ваши встречи за последние 7 дней и на 30 дней вперёд и смогут отвечать на вопросы о расписании и искать людей в адресной книге. Без разрешения ниже — только чтение.";
 "mcp.createMeetings" = "Разрешить создавать встречи";
-"mcp.createMeetings.description" = "AI-ассистент сможет предложить встречу с приглашениями. Каждую вы подтверждаете в окне OWA Widget: пока вы не подтвердите, ничего не отправляется.";
+"mcp.createMeetings.description" = "AI-ассистент сможет предложить встречу с приглашениями. Каждую вы подтверждаете в окне OWA Widget: пока вы не подтвердите, ничего не отправляется. Кнопка «Изменить…» открывает её в окне «Новая встреча»: там можно поменять время и участников и отправить самому.";
 "mcp.confirm.title" = "%@ просит создать встречу";
 "mcp.confirm.titleUnknownClient" = "AI-ассистент просит создать встречу";
 "mcp.confirm.countdown" = "Осталось %d с";
@@ -454,6 +460,8 @@
 "mcp.confirm.agendaForAttendees" = "Описание — его получат участники";
 "mcp.confirm.today" = "сегодня";
 "mcp.confirm.tomorrow" = "завтра";
+"mcp.confirm.edit" = "Изменить…";
+"mcp.confirm.edit.help" = "Открыть встречу в окне «Новая встреча»: там можно поменять время, участников и текст и отправить приглашения самому";
 "mcp.privacy.warning" = "Названия, места и описания встреч, а также имена и адреса участников будут уходить в AI-сервис, которым вы пользуетесь. Проверьте, разрешает ли это политика вашей компании.";
 "mcp.status" = "Статус";
 "mcp.status.stopped" = "Не запущен";

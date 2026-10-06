@@ -53,6 +53,17 @@ final class CreateMeetingViewModel: ObservableObject {
     @Published var recentAttendees: [AttendeeRecord] = []
     @Published var recentLocations: [LocationRecord] = []
     @Published var locationFocused = false
+    /// A draft from an AI assistant that arrived while the user was filling in their own: the
+    /// window asks whether to replace it instead of overwriting their work.
+    @Published var offeredSeed: MeetingDraftSeed? = nil
+    /// The assistant whose draft the form holds ("Claude Code"; empty when unknown), `nil` for
+    /// a form the user started. Shown in the bottom bar until the window is reset.
+    @Published var seedClient: String? = nil
+
+    /// The time an assistant proposed, kept selected through slot reloads: `findSlots` clears
+    /// the selection before every fetch. Tied to the search key it was made for, and dropped as
+    /// soon as the user picks a time themselves.
+    private var seededSlot: (interval: DateInterval, key: String)?
 
     var suggestedAttendees: [AttendeeRecord] { recentAttendees }
 
@@ -91,6 +102,7 @@ final class CreateMeetingViewModel: ObservableObject {
     /// Изменение `draft` запускает debounced auto-refresh слотов.
     func shiftSelectedWeek(by weeks: Int) {
         guard weeks != 0 else { return }
+        seededSlot = nil
         clearSlotResults(showSpinner: true)
         var d = draft
         d.selectedWeekStart = d.weekStartOffset(by: weeks)
@@ -101,6 +113,7 @@ final class CreateMeetingViewModel: ObservableObject {
     func resetToCurrentWeek() {
         let monday = MeetingDraft.mondayOfWeek(containing: Date())
         guard MeetingDraft.weekCalendar.startOfDay(for: draft.selectedWeekStart) != monday else { return }
+        seededSlot = nil
         clearSlotResults(showSpinner: true)
         var d = draft
         d.selectedWeekStart = monday
@@ -319,6 +332,7 @@ final class CreateMeetingViewModel: ObservableObject {
 
         let requiredEmails = draft.requiredAttendees.map(\.email)
         let optionalEmails = draft.optionalAttendees.map(\.email)
+        let searchKey = draft.slotAutoRefreshKey
         let range = draft.dateInterval()
         let displayRange = draft.slotGridWeekInterval()
 
@@ -350,13 +364,25 @@ final class CreateMeetingViewModel: ObservableObject {
 
         if gen == findSlotsGeneration {
             isLoadingSlots = false
+            restoreSeededSlot(searchKey: searchKey)
         }
+    }
+
+    private func restoreSeededSlot(searchKey: String) {
+        guard let seeded = seededSlot else { return }
+        guard seeded.key == searchKey else {
+            // The user changed attendees, week or duration since: their search, their choice.
+            seededSlot = nil
+            return
+        }
+        selectedSlot = FreeSlot(start: seeded.interval.start, end: seeded.interval.end)
     }
 
     // MARK: - Create
 
     func selectSlot(start: Date, end: Date) {
         guard end > Date() else { return }
+        seededSlot = nil
         selectedSlot = FreeSlot(start: start, end: end, score: 0)
     }
 
@@ -367,6 +393,7 @@ final class CreateMeetingViewModel: ObservableObject {
     /// после возврата свежих freeSlots.
     func setDuration(_ minutes: Int) {
         guard minutes != draft.durationMinutes else { return }
+        seededSlot = nil
         draft.durationMinutes = minutes
         if let slot = selectedSlot {
             let newEnd = slot.start.addingTimeInterval(Double(minutes) * 60)
@@ -398,6 +425,7 @@ final class CreateMeetingViewModel: ObservableObject {
             set: { newStart in
                 let duration = self.selectedSlot.map { $0.end.timeIntervalSince($0.start) } ?? 1800
                 let newEnd = newStart.addingTimeInterval(max(1800, duration))
+                self.seededSlot = nil
                 self.selectedSlot = FreeSlot(start: newStart, end: newEnd, score: 0)
                 var d = self.draft
                 d.selectedWeekStart = MeetingDraft.mondayOfWeek(containing: newStart)
@@ -412,6 +440,7 @@ final class CreateMeetingViewModel: ObservableObject {
             set: { newEnd in
                 let start = self.selectedSlot?.start ?? self.nextRoundedSlotStart()
                 guard newEnd > start else { return }
+                self.seededSlot = nil
                 self.selectedSlot = FreeSlot(start: start, end: newEnd, score: 0)
             }
         )
@@ -436,6 +465,54 @@ final class CreateMeetingViewModel: ObservableObject {
         successMessage = nil
         slotsSearched = false
         locationFocused = false
+        offeredSeed = nil
+        seedClient = nil
+        seededSlot = nil
+    }
+
+    // MARK: - Draft from an AI assistant
+
+    /// Nothing of the user's own would be lost by replacing the form: no title, attendees or
+    /// agenda typed yet, or the meeting was already created. The location is ignored, the window
+    /// fills it with the last one used.
+    var canReplaceDraftSilently: Bool {
+        if successMessage != nil { return true }
+        return draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && draft.agenda.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && draft.allAttendees.isEmpty
+    }
+
+    /// Takes a draft handed over from the MCP confirmation panel: fills the form right away, or
+    /// offers it next to the user's own unfinished one.
+    func receive(_ seed: MeetingDraftSeed) {
+        if canReplaceDraftSilently {
+            apply(seed)
+        } else {
+            offeredSeed = seed
+        }
+    }
+
+    /// Fills the form from the seed and selects the proposed time. The attendees do not go to
+    /// the frequent contacts: the user did not pick them.
+    func apply(_ seed: MeetingDraftSeed) {
+        if successMessage != nil { reset() }
+        offeredSeed = nil
+        errorMessage = nil
+        clearSearch(kind: .required)
+        clearSearch(kind: .optional)
+        let newDraft = seed.makeDraft()
+        draft = newDraft
+        seedClient = seed.client
+        seededSlot = (seed.slot, newDraft.slotAutoRefreshKey)
+        selectedSlot = FreeSlot(start: seed.slot.start, end: seed.slot.end)
+        // Not left to the debounced auto-refresh alone: it may not fire while the window is
+        // still animating open (see init), and it does not fire at all when the search key
+        // happens to be unchanged.
+        Task { [weak self] in await self?.findSlots() }
+    }
+
+    func dismissOfferedSeed() {
+        offeredSeed = nil
     }
 
     func createMeeting() async {

@@ -129,7 +129,8 @@ final class MCPCalendarToolsTests: XCTestCase {
         provider: DetailsProvider? = nil,
         enabled: Bool = true,
         confirmer: FakeConfirmer = FakeConfirmer(.rejected),
-        canCreateMeetings: Bool = true
+        canCreateMeetings: Bool = true,
+        handOff: @escaping (MeetingDraftSeed) -> Void = { _ in }
     ) -> (MCPCalendarTools, CalendarService) {
         let providers: [any CalendarProvider] = [provider ?? DetailsProvider(account: exchange), DetailsProvider(account: local)]
         let service = CalendarService(
@@ -151,6 +152,7 @@ final class MCPCalendarToolsTests: XCTestCase {
         let tools = MCPCalendarTools(
             calendarService: service,
             confirmer: confirmer,
+            handOff: handOff,
             clock: { [now] in now },
             timeZone: { [zone] in zone },
             isEnabled: { enabled },
@@ -595,6 +597,43 @@ final class MCPCalendarToolsTests: XCTestCase {
         XCTAssertEqual(confirmer.proposals.count, 1)
         let created = await provider.created
         XCTAssertEqual(created.count, 1)
+    }
+
+    func testEditHandsTheMeetingToTheWindowWithoutCreatingIt() async {
+        let provider = DetailsProvider(account: exchange, people: [ivanov, partner], ownEmail: "me@corp.ru")
+        let confirmer = FakeConfirmer(.handedOff)
+        var seeds: [MeetingDraftSeed] = []
+        let (tools, _) = makeTools(events: [], provider: provider, confirmer: confirmer, handOff: { seeds.append($0) })
+        _ = await tools.call(name: "find_people", arguments: ["query": "Ivanov"])
+        var arguments = meetingArguments
+        arguments["agenda"] = "План релиза"
+
+        let result = await tools.call(name: "create_meeting", arguments: arguments, client: "Claude Code")
+
+        // Settled, not failed: an error would make the model try again.
+        XCTAssertFalse(result.isError, result.errorMessage ?? "")
+        XCTAssertEqual(result.structured?["created"], false)
+        XCTAssertEqual(result.structured?["handed_off"], true)
+        let created = await provider.created
+        XCTAssertTrue(created.isEmpty)
+
+        XCTAssertEqual(seeds.count, 1)
+        let seed = seeds.first
+        XCTAssertEqual(seed?.title, "Синк по релизу")
+        XCTAssertEqual(seed?.agenda, "План релиза")
+        XCTAssertEqual(seed?.slot, DateInterval(start: date(6, 15), end: date(6, 15, 30)))
+        XCTAssertEqual(seed?.accountID, exchange.id)
+        XCTAssertEqual(seed?.client, "Claude Code")
+        XCTAssertEqual(seed?.required.map(\.email), ["ivanov@corp.ru"])
+        XCTAssertEqual(seed?.required.map(\.displayName), ["Иванов Иван"])
+        XCTAssertEqual(seed?.optional.map(\.email), ["ivanov@partner.com"])
+
+        // The model repeating itself gets the same answer, not a second window.
+        let again = await tools.call(name: "create_meeting", arguments: arguments, client: "Claude Code").structured
+        XCTAssertEqual(again?["duplicate"], true)
+        XCTAssertEqual(again?["handed_off"], true)
+        XCTAssertEqual(seeds.count, 1)
+        XCTAssertEqual(confirmer.proposals.count, 1)
     }
 
     func testCreateMeetingRejectsBadArgumentsBeforeAskingTheUser() async {
