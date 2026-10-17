@@ -59,10 +59,18 @@ final class ICSFeedSettings: @unchecked Sendable {
         return token
     }
 
-    /// Accounts whose meetings the feed serves: Exchange only. EventKit calendars are already in
-    /// Calendar.app, and serving them again would duplicate every event.
+    /// Accounts whose meetings the feed serves: Exchange, over OWA or ActiveSync. EventKit
+    /// calendars are already in Calendar.app, and serving them again would duplicate every event.
     static func feedAccountIDs(_ accounts: [CalendarAccount]) -> Set<UUID> {
-        Set(accounts.filter { $0.accountType == .owa }.map(\.id))
+        Set(accounts.filter { servesFeed($0.accountType) }.map(\.id))
+    }
+
+    /// Exhaustive on purpose: a new account type has to decide here whether it belongs in the feed.
+    private static func servesFeed(_ type: AccountType) -> Bool {
+        switch type {
+        case .owa, .eas: true
+        case .googleCalendar, .eventKit: false
+        }
     }
 
     /// 128 random bits as lowercase hex.

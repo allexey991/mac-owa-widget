@@ -74,8 +74,9 @@ final class ICSFeedSettingsTests: XCTestCase {
 
     func testOnlyExchangeAccountsFeedTheCalendar() {
         let owa = CalendarAccount(displayName: "Work", serverURL: "https://mail.example", email: "a@example.com", accountType: .owa)
+        let eas = CalendarAccount(displayName: "Work EAS", serverURL: "https://mail.example", email: "a@example.com", accountType: .eas)
         let eventKit = CalendarAccount(displayName: "iCloud", serverURL: "", email: "", accountType: .eventKit)
 
-        XCTAssertEqual(ICSFeedSettings.feedAccountIDs([owa, eventKit]), [owa.id])
+        XCTAssertEqual(ICSFeedSettings.feedAccountIDs([owa, eas, eventKit]), [owa.id, eas.id])
     }
 }
