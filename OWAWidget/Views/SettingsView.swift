@@ -19,6 +19,10 @@ struct SettingsView: View {
                 .tabItem { Label(localization.tr("settings.tab.preferences"), systemImage: "slider.horizontal.3") }
                 .onAppear { DiagnosticLog.event("SettingsView preferences tab appeared") }
 
+            ICSFeedSettingsView()
+                .tabItem { Label(localization.tr("settings.tab.icsFeed"), systemImage: "calendar.badge.plus") }
+                .onAppear { DiagnosticLog.event("SettingsView icsFeed tab appeared") }
+
             MCPSettingsView()
                 .tabItem { Label(localization.tr("settings.tab.mcp"), systemImage: "sparkles") }
                 .onAppear { DiagnosticLog.event("SettingsView mcp tab appeared") }
@@ -27,8 +31,9 @@ struct SettingsView: View {
                 .tabItem { Label(localization.tr("settings.tab.about"), systemImage: "info.circle") }
                 .onAppear { DiagnosticLog.event("SettingsView about tab appeared") }
         }
-        // Four tabs: at 480 pt macOS folds the whole tab bar into a ">>" overflow menu.
-        .frame(width: 600)
+        // Five tabs: too narrow a window makes macOS fold the whole tab bar into a ">>" overflow
+        // menu (four tabs already did at 480 pt).
+        .frame(width: 680)
         .onAppear { DiagnosticLog.event("SettingsView TabView appeared") }
         .sheet(item: $vm.editingAccount) { _ in
             accountSheet

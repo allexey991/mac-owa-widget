@@ -131,6 +131,8 @@ struct OWAWidgetApp: App {
         // Same launch-time hook: the label renders at launch, so MCP clients can connect before
         // the popover has ever been opened.
         MCPServerService.shared.start(calendarService: calendarService)
+        // Same reason: Calendar.app polls the feed whether or not the popover was ever opened.
+        ICSFeedService.shared.start(calendarService: calendarService, localization: localizationService)
     }
 
     private func configureAppIcon() {
