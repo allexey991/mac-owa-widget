@@ -145,6 +145,26 @@ final class EASCalendarMappingTests: XCTestCase {
         XCTAssertTrue(item.isRecurring, "series must be recognised so they are not shown as singles")
     }
 
+    func testReminderReachesTheEventAndIsAbsentWhenNotSet() throws {
+        let withReminder = try applicationData { w in
+            w.leaf(CAL.subject, "Standup")
+            w.leaf(CAL.startTime, "20260915T070000Z")
+            w.leaf(CAL.endTime, "20260915T073000Z")
+            w.leaf(CAL.reminder, "15")
+        }
+        let without = try applicationData { w in
+            w.leaf(CAL.subject, "Standup")
+            w.leaf(CAL.startTime, "20260915T070000Z")
+            w.leaf(CAL.endTime, "20260915T073000Z")
+        }
+        let mapper = EASCalendarMapper()
+        let set = try XCTUnwrap(EASCalendarItem(serverId: "20:1", applicationData: withReminder))
+        let unset = try XCTUnwrap(EASCalendarItem(serverId: "20:2", applicationData: without))
+
+        XCTAssertEqual(mapper.event(from: set, accountID: UUID())?.reminderMinutesBeforeStart, 15)
+        XCTAssertNil(mapper.event(from: unset, accountID: UUID())?.reminderMinutesBeforeStart)
+    }
+
     func testRejectsAnItemWithoutAServerId() throws {
         let data = try applicationData { w in w.leaf(CAL.subject, "X") }
         XCTAssertNil(EASCalendarItem(serverId: "", applicationData: data))

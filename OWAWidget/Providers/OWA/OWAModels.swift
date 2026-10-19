@@ -39,6 +39,8 @@ struct OWACalendarItem: Decodable {
     /// Global Object ID of the meeting, hex. `GetCalendarEvent` returns it, `GetCalendarView`
     /// does not (and ignores a request for it).
     let UID: String?
+    let ReminderIsSet: Bool?
+    let ReminderMinutesBeforeStart: Int?
 
     init(
         ItemId: OWAItemId?,
@@ -64,7 +66,9 @@ struct OWACalendarItem: Decodable {
         InstanceKey: String? = nil,
         SeriesId: String? = nil,
         IsRecurring: Bool? = nil,
-        UID: String? = nil
+        UID: String? = nil,
+        ReminderIsSet: Bool? = nil,
+        ReminderMinutesBeforeStart: Int? = nil
     ) {
         self.ItemId = ItemId
         self.Subject = Subject
@@ -90,6 +94,8 @@ struct OWACalendarItem: Decodable {
         self.SeriesId = SeriesId
         self.IsRecurring = IsRecurring
         self.UID = UID
+        self.ReminderIsSet = ReminderIsSet
+        self.ReminderMinutesBeforeStart = ReminderMinutesBeforeStart
     }
 
     init(from decoder: Decoder) throws {
@@ -118,6 +124,10 @@ struct OWACalendarItem: Decodable {
         SeriesId = try c.decodeIfPresent(String.self, forKey: .SeriesId)
         IsRecurring = try c.decodeIfPresent(Bool.self, forKey: .IsRecurring)
         UID = try c.decodeIfPresent(String.self, forKey: .UID)
+        ReminderIsSet = try? c.decodeIfPresent(Bool.self, forKey: .ReminderIsSet)
+        // EWS types it as an int, but JSON endpoints have been seen sending numbers as strings.
+        ReminderMinutesBeforeStart = (try? c.decodeIfPresent(Int.self, forKey: .ReminderMinutesBeforeStart))
+            ?? (try? c.decodeIfPresent(String.self, forKey: .ReminderMinutesBeforeStart)).flatMap { $0.flatMap(Int.init) }
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -125,6 +135,7 @@ struct OWACalendarItem: Decodable {
         case Location, Organizer, TextBody, Body, UniqueBody, NormalizedBody, Preview
         case JoinOnlineMeetingUrl, RequiredAttendees, OptionalAttendees
         case ResponseType, IsResponseRequested, InstanceKey, SeriesId, IsRecurring, UID
+        case ReminderIsSet, ReminderMinutesBeforeStart
     }
 
     private struct OWAEncodedCategory: Decodable {

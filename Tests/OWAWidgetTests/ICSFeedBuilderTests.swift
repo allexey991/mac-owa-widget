@@ -33,7 +33,8 @@ final class ICSFeedBuilderTests: XCTestCase {
         isCancelled: Bool = false,
         categories: [String] = [],
         responseType: MeetingResponseType = .accepted,
-        seriesID: String? = nil
+        seriesID: String? = nil,
+        reminderMinutesBeforeStart: Int? = nil
     ) -> CalendarEvent {
         CalendarEvent(
             id: id,
@@ -51,7 +52,8 @@ final class ICSFeedBuilderTests: XCTestCase {
             isCancelled: isCancelled,
             categories: categories,
             responseType: responseType,
-            seriesID: seriesID
+            seriesID: seriesID,
+            reminderMinutesBeforeStart: reminderMinutesBeforeStart
         )
     }
 
@@ -66,12 +68,29 @@ final class ICSFeedBuilderTests: XCTestCase {
             .filter { !$0.isEmpty }
     }
 
+    /// Each event's own properties; nested `VALARM` blocks are left out (see `alarms`).
     private func vevents(_ ics: String) -> [[String]] {
         var result: [[String]] = []
         var current: [String]?
+        var inAlarm = false
         for line in lines(ics) {
             if line == "BEGIN:VEVENT" { current = [] }
             else if line == "END:VEVENT" { if let c = current { result.append(c) }; current = nil }
+            else if line == "BEGIN:VALARM" { inAlarm = true }
+            else if line == "END:VALARM" { inAlarm = false }
+            else if !inAlarm { current?.append(line) }
+        }
+        return result
+    }
+
+    /// The `VALARM` blocks of the first event, each as its property lines.
+    private func alarms(_ ics: String) -> [[String]] {
+        var result: [[String]] = []
+        var current: [String]?
+        for line in lines(ics) {
+            if line == "END:VEVENT" { break }
+            if line == "BEGIN:VALARM" { current = [] }
+            else if line == "END:VALARM" { if let c = current { result.append(c) }; current = nil }
             else { current?.append(line) }
         }
         return result
@@ -208,8 +227,38 @@ final class ICSFeedBuilderTests: XCTestCase {
         XCTAssertEqual(value("SUMMARY", in: props), "Declined: Planning")
     }
 
-    func testNoAlarmsAreEmitted() {
-        XCTAssertFalse(build([event()]).contains("BEGIN:VALARM"))
+    // MARK: - Alarms
+
+    func testMeetingWithoutReminderGetsAlarmsAMinuteBeforeAndAtStart() {
+        let found = alarms(build([event(title: "Standup")]))
+
+        XCTAssertEqual(found.compactMap { value("TRIGGER", in: $0) }, ["-PT1M", "PT0S"])
+        for alarm in found {
+            XCTAssertEqual(value("ACTION", in: alarm), "DISPLAY")
+            XCTAssertEqual(value("DESCRIPTION", in: alarm), "Standup")
+        }
+    }
+
+    func testServerReminderReplacesTheDefault() {
+        let found = alarms(build([event(reminderMinutesBeforeStart: 15)]))
+
+        XCTAssertEqual(found.compactMap { value("TRIGGER", in: $0) }, ["-PT15M"])
+    }
+
+    func testAlarmUIDsAreStableAndDistinct() {
+        let first = alarms(build([event()])).compactMap { value("X-WR-ALARMUID", in: $0) }
+        let again = alarms(build([event()])).compactMap { value("X-WR-ALARMUID", in: $0) }
+
+        XCTAssertEqual(Set(first).count, 2)
+        XCTAssertEqual(first, again)
+    }
+
+    func testNoAlarmsForCancelledDeclinedOrAllDayWithoutReminder() {
+        XCTAssertTrue(alarms(build([event(isCancelled: true)])).isEmpty)
+        XCTAssertTrue(alarms(build([event(responseType: .declined)])).isEmpty)
+        XCTAssertTrue(alarms(build([event(
+            start: "2026-10-19T21:00:00Z", end: "2026-10-20T21:00:00Z", isAllDay: true
+        )])).isEmpty)
     }
 
     // MARK: - Encoding

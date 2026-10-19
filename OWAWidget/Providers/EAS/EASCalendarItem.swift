@@ -132,6 +132,8 @@ struct EASCalendarItem: Codable, Sendable, Hashable {
     var recurrence: EASRecurrence?
     /// Occurrences the organiser moved or removed.
     var exceptions: [EASException]
+    /// `calendar:Reminder`, minutes before start; absent when the item has no reminder.
+    var reminder: Int? = nil
 
     var isRecurring: Bool { recurrence != nil }
 
@@ -194,6 +196,7 @@ extension EASCalendarItem {
         recurrence = item.child(CAL.recurrence).flatMap(EASCalendarItem.parseRecurrence)
         exceptions = (item.child(CAL.exceptions)?.all(CAL.exception) ?? [])
             .compactMap(EASCalendarItem.parseException)
+        reminder = item.value(CAL.reminder).flatMap(Int.init)
     }
 
     /// `Type` and `Interval` are the only fields every rule carries; the rest depend on the kind.
@@ -236,6 +239,7 @@ extension EASCalendarItem {
             meetingStatus: node.value(CAL.meetingStatus).flatMap(Int.init),
             responseType: node.value(CAL.responseType).flatMap(Int.init),
             onlineMeetingConfLink: node.value(CAL.onlineMeetingConfLink)?.trimmedOrNil,
+            reminder: node.value(CAL.reminder).flatMap(Int.init),
             attendees: attendeeNodes.map { nodes in
                 nodes.compactMap { node -> EASAttendee? in
                     let name = node.value(CAL.name)?.trimmedOrNil

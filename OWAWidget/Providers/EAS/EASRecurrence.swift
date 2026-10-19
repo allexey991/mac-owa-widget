@@ -53,6 +53,7 @@ struct EASException: Codable, Sendable, Hashable {
     var meetingStatus: Int?
     var responseType: Int?
     var onlineMeetingConfLink: String?
+    var reminder: Int? = nil
     var attendees: [EASAttendee]?
 }
 

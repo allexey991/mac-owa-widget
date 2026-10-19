@@ -138,7 +138,8 @@ actor OWACalendarProvider: CalendarProvider {
             instanceKey: item.InstanceKey,
             icalUID: identity.icalUID,
             seriesID: identity.seriesID,
-            isRecurring: identity.isRecurring
+            isRecurring: identity.isRecurring,
+            reminderMinutesBeforeStart: item.ReminderIsSet == true ? item.ReminderMinutesBeforeStart : nil
         )
     }
 

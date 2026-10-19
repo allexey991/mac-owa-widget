@@ -81,7 +81,8 @@ struct EASCalendarMapper {
             changeKey: item.serverId,
             // Identifies which occurrence of a series this is, for callers that need to address
             // it on the server.
-            instanceKey: item.isRecurring ? EASDate.format(occurrence.originalStart) : nil
+            instanceKey: item.isRecurring ? EASDate.format(occurrence.originalStart) : nil,
+            reminderMinutesBeforeStart: effective.reminder
         )
     }
 
@@ -98,6 +99,7 @@ struct EASCalendarMapper {
         if let response = exception.responseType { merged.responseType = response }
         if let link = exception.onlineMeetingConfLink { merged.onlineMeetingConfLink = link }
         if let attendees = exception.attendees { merged.attendees = attendees }
+        if let reminder = exception.reminder { merged.reminder = reminder }
         return merged
     }
 

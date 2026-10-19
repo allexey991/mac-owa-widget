@@ -136,8 +136,40 @@ enum ICSFeedBuilder {
         if !categories.isEmpty {
             lines.append("CATEGORIES:\(categories.map(escapeText).joined(separator: ","))")
         }
+        if !event.isCancelled && !isDeclined {
+            let uid = uid(for: event)
+            for minutes in alarmMinutes(for: event) {
+                lines += alarmLines(minutesBeforeStart: minutes, eventUID: uid, summary: summary)
+            }
+        }
         lines.append("END:VEVENT")
         return lines
+    }
+
+    /// Many meetings are created without a reminder, and Calendar.app only notifies through
+    /// `VALARM`. The default — a minute before and at the start — is what the user asked for.
+    static let defaultAlarmMinutes = [1, 0]
+
+    /// The server's reminder when it has one; otherwise the default. An all-day event without
+    /// one gets none: an alert at midnight helps nobody.
+    static func alarmMinutes(for event: CalendarEvent) -> [Int] {
+        if let minutes = event.reminderMinutesBeforeStart, minutes >= 0 { return [minutes] }
+        return event.isAllDay ? [] : defaultAlarmMinutes
+    }
+
+    /// `X-WR-ALARMUID` keeps the alarm's identity across refreshes, so Calendar does not treat an
+    /// already dismissed alert as new.
+    private static func alarmLines(minutesBeforeStart minutes: Int, eventUID: String, summary: String) -> [String] {
+        let alarmUID = "\(eventUID.prefix(32))-alarm-\(minutes)@owawidget"
+        return [
+            "BEGIN:VALARM",
+            "UID:\(alarmUID)",
+            "X-WR-ALARMUID:\(alarmUID)",
+            "ACTION:DISPLAY",
+            "DESCRIPTION:\(escapeText(summary))",
+            "TRIGGER:\(minutes == 0 ? "PT0S" : "-PT\(minutes)M")",
+            "END:VALARM",
+        ]
     }
 
     /// Join link first: where Calendar.app looks for a "Join" button is undocumented, so the link

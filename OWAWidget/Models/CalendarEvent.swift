@@ -74,6 +74,9 @@ struct CalendarEvent: Identifiable, Sendable, Hashable, Codable {
     /// Markup behind `fullBody`, used to render tables. In-memory only: it is not part of the
     /// Codable representation, so the on-disk cache stays small.
     let fullBodyHTML: String?
+    /// The reminder set on the server, in minutes before start. `nil` = no reminder, or the
+    /// provider does not report one.
+    let reminderMinutesBeforeStart: Int?
 
     init(
         id: String,
@@ -99,7 +102,8 @@ struct CalendarEvent: Identifiable, Sendable, Hashable, Codable {
         isRecurring: Bool = false,
         detailedAttendees: [EventAttendee]? = nil,
         fullBody: String? = nil,
-        fullBodyHTML: String? = nil
+        fullBodyHTML: String? = nil,
+        reminderMinutesBeforeStart: Int? = nil
     ) {
         self.id = id
         self.title = title
@@ -125,6 +129,7 @@ struct CalendarEvent: Identifiable, Sendable, Hashable, Codable {
         self.detailedAttendees = detailedAttendees
         self.fullBody = fullBody
         self.fullBodyHTML = fullBodyHTML
+        self.reminderMinutesBeforeStart = reminderMinutesBeforeStart
     }
 
     init(from decoder: Decoder) throws {
@@ -153,6 +158,7 @@ struct CalendarEvent: Identifiable, Sendable, Hashable, Codable {
         detailedAttendees = try c.decodeIfPresent([EventAttendee].self, forKey: .detailedAttendees)
         fullBody = try c.decodeIfPresent(String.self, forKey: .fullBody)
         fullBodyHTML = nil
+        reminderMinutesBeforeStart = try c.decodeIfPresent(Int.self, forKey: .reminderMinutesBeforeStart)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -180,6 +186,7 @@ struct CalendarEvent: Identifiable, Sendable, Hashable, Codable {
         try c.encode(isRecurring, forKey: .isRecurring)
         try c.encodeIfPresent(detailedAttendees, forKey: .detailedAttendees)
         try c.encodeIfPresent(fullBody, forKey: .fullBody)
+        try c.encodeIfPresent(reminderMinutesBeforeStart, forKey: .reminderMinutesBeforeStart)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -187,7 +194,7 @@ struct CalendarEvent: Identifiable, Sendable, Hashable, Codable {
         case isAllDay, organizer, attendees, accountID
         case isCancelled, isOrganizer, categories, responseType, changeKey, instanceKey
         case icalUID, seriesID, isRecurring
-        case detailedAttendees, fullBody
+        case detailedAttendees, fullBody, reminderMinutesBeforeStart
     }
 
     func withResponseType(_ type: MeetingResponseType) -> CalendarEvent {
@@ -200,7 +207,8 @@ struct CalendarEvent: Identifiable, Sendable, Hashable, Codable {
             categories: categories, responseType: type, changeKey: changeKey,
             instanceKey: instanceKey, icalUID: icalUID, seriesID: seriesID, isRecurring: isRecurring,
             detailedAttendees: detailedAttendees,
-            fullBody: fullBody, fullBodyHTML: fullBodyHTML
+            fullBody: fullBody, fullBodyHTML: fullBodyHTML,
+            reminderMinutesBeforeStart: reminderMinutesBeforeStart
         )
     }
 
@@ -217,7 +225,8 @@ struct CalendarEvent: Identifiable, Sendable, Hashable, Codable {
             instanceKey: instanceKey, icalUID: details.icalUID ?? icalUID, seriesID: seriesID,
             isRecurring: isRecurring, detailedAttendees: details.attendees,
             fullBody: details.body ?? fullBody,
-            fullBodyHTML: details.bodyHTML ?? fullBodyHTML
+            fullBodyHTML: details.bodyHTML ?? fullBodyHTML,
+            reminderMinutesBeforeStart: reminderMinutesBeforeStart
         )
     }
 
